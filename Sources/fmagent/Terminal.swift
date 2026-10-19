@@ -57,7 +57,7 @@ final class WelcomeApple: @unchecked Sendable {
 
 let welcomeApple = WelcomeApple()
 
-enum Key { case char(Character), enter, tab, backspace, delete, up, down, left, right, home, end, esc, ctrl(UInt8), resize, tick, eof, none }
+enum Key { case char(Character), paste(String), enter, tab, backspace, delete, up, down, left, right, home, end, esc, ctrl(UInt8), resize, tick, eof, none }
 
 // Keys read while waiting for a cursor-position report, replayed before anything new from stdin.
 // Only touched from the main thread (the line editor).
@@ -105,6 +105,15 @@ func readKey(timeoutMs: Int32 = -1) -> Key {
         case "H", "1~", "7~": return .home
         case "F", "4~", "8~": return .end
         case "3~": return .delete
+        case "200~":  // bracketed paste: everything up to ESC [201~ is pasted text, newlines included
+            let end = Array("\u{1B}[201~".utf8)
+            var pasted: [UInt8] = []
+            while let c = readByte(timeoutMs: 500) {
+                pasted.append(c)
+                if pasted.count >= end.count && Array(pasted.suffix(end.count)) == end { break }
+            }
+            if Array(pasted.suffix(end.count)) == end { pasted.removeLast(end.count) }
+            return .paste(String(decoding: pasted, as: UTF8.self))
         default: return .none
         }
     case 0..<0x20: return .ctrl(b)
@@ -177,6 +186,7 @@ final class TerminalUI {
     var forcedMenu = false  // Tab opened the menu on a plain word
     var menuDismissed = false
     var histIdx = 0
+    var pastes = PasteStore()
 
     init(autoApprove: Bool) {
         self.autoApprove = autoApprove
@@ -196,7 +206,7 @@ final class TerminalUI {
     func start() {
         // Ctrl-C while the model works: put the terminal back before quitting
         signal(SIGINT) { _ in
-            let restore: StaticString = "\u{1B}[r\u{1B}[999;1H\r\n"
+            let restore: StaticString = "\u{1B}[r\u{1B}[?2004l\u{1B}[999;1H\r\n"
             restore.withUTF8Buffer { _ = Darwin.write(STDOUT_FILENO, $0.baseAddress, $0.count) }
             _exit(130)
         }
@@ -238,6 +248,7 @@ final class TerminalUI {
         var raw = cooked
         cfmakeraw(&raw)
         tcsetattr(STDIN_FILENO, TCSANOW, &raw)
+        writeOut("\u{1B}[?2004h")  // bracketed paste, so pasted newlines don't send the line
         var action = sigaction()
         action.__sigaction_u.__sa_handler = { _ in }
         sigaction(SIGWINCH, &action, nil)  // no SA_RESTART: a resize interrupts read() so the box is redrawn
@@ -245,6 +256,7 @@ final class TerminalUI {
 
     func leaveRaw() {
         tcsetattr(STDIN_FILENO, TCSANOW, &cooked)
+        writeOut("\u{1B}[?2004l")
         signal(SIGWINCH, SIG_DFL)
     }
 
@@ -294,8 +306,15 @@ final class TerminalUI {
                 cur += 1
                 sel = 0
                 if ch == " " { forcedMenu = false }
+            case .paste(let text):
+                let inserted = pastes.insert(text)
+                buf.insert(contentsOf: inserted, at: cur)
+                cur += inserted.count
             case .backspace:
-                if cur > 0 { buf.remove(at: cur - 1); cur -= 1; sel = 0 } else if buf.isEmpty { shell = false }
+                if let placeholder = pastes.placeholder(endingAt: String(buf[..<cur])) {
+                    buf.removeSubrange((cur - placeholder.count)..<cur)
+                    cur -= placeholder.count
+                } else if cur > 0 { buf.remove(at: cur - 1); cur -= 1; sel = 0 } else if buf.isEmpty { shell = false }
             case .delete:
                 if cur < buf.count { buf.remove(at: cur) }
             case .ctrl(3), .ctrl(4):  // Ctrl-C / Ctrl-D: clear the line, leave shell mode, then quit
@@ -379,7 +398,7 @@ final class TerminalUI {
         if wasShell || regionBottom - outRow < 6 { welcomeApple.settle() }
         writeOut(s)
         history.append((wasShell ? "!" : "") + text)
-        return (text, wasShell)
+        return (pastes.expand(text), wasShell)
     }
 
     // MARK: drawing

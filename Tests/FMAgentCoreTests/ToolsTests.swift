@@ -162,3 +162,15 @@ func visible(_ s: String) -> String { s.replacing(/\u{1B}\[[0-9;]*m/, with: "") 
     #expect(extractCursorReport(from: Array("\u{1B}[12;".utf8)) == nil)  // incomplete
     #expect(extractCursorReport(from: Array("abc".utf8)) == nil)
 }
+
+@Test func multiLinePastesBecomePlaceholders() {
+    var pastes = PasteStore()
+    #expect(pastes.insert("one line") == "one line")
+    let code = "fn main() {\r    println!(\"hi\");\r}\r"  // terminals send pasted newlines as \\r
+    let placeholder = pastes.insert(code)
+    #expect(placeholder == "[Pasted text #1 +3 lines]")
+    #expect(pastes.insert("a\nb") == "[Pasted text #2 +2 lines]")
+    #expect(pastes.expand("explain \(placeholder) please") == "explain fn main() {\n    println!(\"hi\");\n}\n please")
+    #expect(pastes.placeholder(endingAt: "explain \(placeholder)") == placeholder)
+    #expect(pastes.placeholder(endingAt: "explain") == nil)
+}

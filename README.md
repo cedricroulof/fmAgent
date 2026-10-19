@@ -47,12 +47,13 @@ In a terminal, fmagent runs full screen with the input box pinned to the bottom.
 |-------|--------------|
 | `!command` | Typing `!` first switches the box to shell mode; the command runs directly in zsh on your terminal (interactive programs like `vim` work) and is never sent to the model. Ctrl-C stops it without leaving fmagent. |
 | `@path` | Opens a file picker above the box. ↑/↓ to move, Tab or Enter to insert, Esc to close. Picking a folder lists its content. The model receives the plain path, without the `@`. |
+| Paste | A multi-line paste shows as `[Pasted text #1 +17 lines]` and is sent in full when you press Enter; Backspace removes it whole. |
 | Tab | Completes the file or folder name under the cursor (opens the picker when there are several matches). |
 | ↑ / ↓ | History. ←/→, Home/End, Ctrl-A/E/K/U/W edit the line. |
 | `/clear` | Clears the screen (back to the welcome apple) and starts a new conversation (`/reset` does the same). Ctrl-L only clears the screen. |
 | Ctrl-C / Ctrl-D | Clear the line; on an empty line, quit. Ctrl-C while the model works also quits. |
 
-When input is piped (`echo '!ls' | fmagent`), it falls back to plain line-by-line mode.
+When input is piped (`echo '!ls' | fmagent`), it falls back to plain line-by-line mode (each line is a separate message).
 
 ## Tools given to the model
 
@@ -71,7 +72,6 @@ Every command and file write is shown before it runs and needs your approval, un
 
 - The on-device model is small: it sometimes picks the wrong command, and code it writes may not compile. Run it yourself with `!` (e.g. `!rustc src/main.rs`) to check.
 - Each `!command` runs in its own shell, so `!cd somewhere` doesn't change fmagent's folder, and your `.zshrc` aliases aren't loaded.
-- Pasting text that contains newlines sends each line as a separate message.
 
 ## Tests
 
