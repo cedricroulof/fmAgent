@@ -59,11 +59,14 @@ func isContextFull(_ error: Error) -> Bool {
     return false
 }
 
-// Tool output could scroll the welcome apple, so it stops spinning first.
-let stopAppleAnimation: @Sendable () -> Void = { welcomeApple.settle() }
+// Before a tool prints: stop background drawing, and settle the welcome apple since tool output could scroll it.
+let stopAnimations: @Sendable () -> Void = {
+    runningSpinner.stop()
+    welcomeApple.settle()
+}
 
 func newSession() -> LanguageModelSession {
-    LanguageModelSession(tools: [RunCommand(approve: approved, willRun: stopAppleAnimation), WriteFile(approve: approved, willRun: stopAppleAnimation)], instructions: instructions)
+    LanguageModelSession(tools: [RunCommand(approve: approved, willRun: stopAnimations), WriteFile(approve: approved, willRun: stopAnimations)], instructions: instructions)
 }
 
 guard case .available = SystemLanguageModel.default.availability else {

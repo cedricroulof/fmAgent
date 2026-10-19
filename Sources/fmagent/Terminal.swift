@@ -59,7 +59,16 @@ let welcomeApple = WelcomeApple()
 
 enum Key { case char(Character), enter, tab, backspace, delete, up, down, left, right, home, end, esc, ctrl(UInt8), resize, tick, eof, none }
 
+// Keys read while waiting for a cursor-position report, replayed before anything new from stdin.
+// Only touched from the main thread (the line editor).
+nonisolated(unsafe) var pendingInput: [UInt8] = []
+
 func readByte(timeoutMs: Int32 = -1) -> UInt8? {
+    if !pendingInput.isEmpty { return pendingInput.removeFirst() }
+    return readStdinByte(timeoutMs: timeoutMs)
+}
+
+func readStdinByte(timeoutMs: Int32 = -1) -> UInt8? {
     if timeoutMs >= 0 {
         var fd = pollfd(fd: STDIN_FILENO, events: Int16(POLLIN), revents: 0)
         guard poll(&fd, 1, timeoutMs) > 0 else { return nil }
@@ -70,7 +79,7 @@ func readByte(timeoutMs: Int32 = -1) -> UInt8? {
 
 /// With a timeout, returns `.tick` when no key arrives in time (used to animate).
 func readKey(timeoutMs: Int32 = -1) -> Key {
-    if timeoutMs >= 0 {
+    if timeoutMs >= 0 && pendingInput.isEmpty {
         var fd = pollfd(fd: STDIN_FILENO, events: Int16(POLLIN), revents: 0)
         let ready = poll(&fd, 1, timeoutMs)
         if ready == 0 { return .tick }
@@ -131,6 +140,25 @@ final class Spinner: @unchecked Sendable {
     func stop() { queue.sync { timer.cancel() } }
 }
 
+/// The running spinner, reachable from tool threads: it is stopped before a tool prints or asks for approval,
+/// so its background writes never interleave with tool output or the echo of the user's answer.
+final class SpinnerSlot: @unchecked Sendable {
+    private let lock = NSLock()
+    private var spinner: Spinner?
+
+    func start(statusRow: Int) { lock.withLock { spinner = Spinner(statusRow: statusRow) } }
+
+    func stop() {
+        let running = lock.withLock { () -> Spinner? in
+            defer { spinner = nil }
+            return spinner
+        }
+        running?.stop()
+    }
+}
+
+let runningSpinner = SpinnerSlot()
+
 final class TerminalUI {
     let autoApprove: Bool
     let cwd: String
@@ -138,7 +166,6 @@ final class TerminalUI {
     var menuRows = 0
     var outRow = 1, outCol = 1  // where the next output line goes inside the scroll region
     var cooked = termios()
-    var spinner: Spinner?
     var history: [String] = []
 
     // line editor state
@@ -197,11 +224,10 @@ final class TerminalUI {
 
     func setRegion() { writeOut("\u{1B}[1;\(regionBottom)r") }
 
-    func startWorking() { spinner = Spinner(statusRow: rows) }
+    func startWorking() { runningSpinner.start(statusRow: rows) }
 
     func stopWorking() {
-        spinner?.stop()
-        spinner = nil
+        runningSpinner.stop()
         welcomeApple.settle()  // the reply may scroll it away
         writeOut("\u{1B}7" + move(rows, 1) + clearLine + statusLine() + "\u{1B}8")
     }
@@ -224,10 +250,16 @@ final class TerminalUI {
 
     func cursorPosition() -> (Int, Int)? {
         writeOut("\u{1B}[6n")
-        var reply = ""
-        while let b = readByte(timeoutMs: 300), b != UInt8(ascii: "R") { reply.append(Character(UnicodeScalar(b))) }
-        let numbers = reply.drop { $0 != "[" }.dropFirst().split(separator: ";").compactMap { Int($0) }
-        return numbers.count == 2 ? (numbers[0], numbers[1]) : nil
+        var received: [UInt8] = []
+        while let b = readStdinByte(timeoutMs: 300) {
+            received.append(b)
+            if let report = extractCursorReport(from: received) {
+                pendingInput += report.rest
+                return (report.row, report.col)
+            }
+        }
+        pendingInput += received  // no report: whatever arrived is the user's typing
+        return nil
     }
 
     /// Reads one line in the bottom box. Returns nil to quit; `shell` is true for `!` commands.
@@ -390,7 +422,7 @@ final class TerminalUI {
         let first = max(0, sel - 4)
         for i in 0..<menuRows {
             let index = first + i
-            let name = String(items[index].prefix(cols - 6))
+            let name = String(items[index].prefix(max(0, cols - 6)))
             s += move(rows - 3 - menuRows + i, 1) + clearLine
             s += index == sel ? "  \(lavender)❯ + \(name)\(reset)" : "    \(dim)+ \(name)\(reset)"
         }

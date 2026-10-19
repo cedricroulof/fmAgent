@@ -150,3 +150,15 @@ func visible(_ s: String) -> String { s.replacing(/\u{1B}\[[0-9;]*m/, with: "") 
     #expect(stripFileMentions("@Package.swift") == "Package.swift")
     #expect(stripFileMentions("mail me at a@b.com, @ alone") == "mail me at a@b.com, @ alone")
 }
+
+@Test func cursorReportKeepsTypeahead() {
+    let report = Array("\u{1B}[12;5R".utf8)
+    #expect(extractCursorReport(from: report).map { [$0.row, $0.col] } == [12, 5])
+    // keys typed before and after the report, including an arrow key and an uppercase R, survive
+    let mixed = Array("hi R\u{1B}[A".utf8) + report + Array("x".utf8)
+    let found = extractCursorReport(from: mixed)
+    #expect(found.map { [$0.row, $0.col] } == [12, 5])
+    #expect(found?.rest == Array("hi R\u{1B}[Ax".utf8))
+    #expect(extractCursorReport(from: Array("\u{1B}[12;".utf8)) == nil)  // incomplete
+    #expect(extractCursorReport(from: Array("abc".utf8)) == nil)
+}
