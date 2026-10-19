@@ -137,3 +137,16 @@ func visible(_ s: String) -> String { s.replacing(/\u{1B}\[[0-9;]*m/, with: "") 
     _ = try await RunCommand(approve: no, willRun: { flag.called = true }).call(arguments: GeneratedContent(properties: ["command": "true"]))
     #expect(flag.called)
 }
+
+@Test func writeFileCreatesMissingDirectories() async throws {
+    let dir = tempPath("project")
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    _ = try await WriteFile(approve: yes).call(arguments: GeneratedContent(properties: ["path": dir + "/src/main.rs", "content": "fn main() {}\n"]))
+    #expect(try String(contentsOfFile: dir + "/src/main.rs", encoding: .utf8) == "fn main() {}\n")
+}
+
+@Test func fileMentionsReachTheModelAsPlainPaths() {
+    #expect(stripFileMentions("explain @src/main.rs and @README.md") == "explain src/main.rs and README.md")
+    #expect(stripFileMentions("@Package.swift") == "Package.swift")
+    #expect(stripFileMentions("mail me at a@b.com, @ alone") == "mail me at a@b.com, @ alone")
+}

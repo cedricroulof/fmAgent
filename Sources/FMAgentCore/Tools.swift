@@ -48,10 +48,14 @@ public struct WriteFile: Tool {
         print("\n\u{1B}[33m write \(path):\u{1B}[0m\n\u{1B}[2m\(content)\u{1B}[0m")
         guard approve("Write this file?") else { return "The user declined to write this file. Do not write it again; answer without it." }
         do {
+            let dir = (path as NSString).deletingLastPathComponent
+            if !dir.isEmpty { try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true) }
             try content.write(toFile: path, atomically: true, encoding: .utf8)
             return "Wrote \(content.utf8.count) bytes to \(path)."
         } catch {
-            return "Failed to write \(path): \(error.localizedDescription)"
+            let message = "Failed to write \(path): \(error.localizedDescription)"
+            print("\u{1B}[31m\(message)\u{1B}[0m")
+            return message
         }
     }
 }

@@ -18,3 +18,8 @@ public func pathCompletions(for partial: String, in cwd: String = FileManager.de
         .sorted { $0.1 != $1.1 ? $0.1 : $0.0.lowercased() < $1.0.lowercased() }
         .map { dirPart + $0.0 + ($0.1 ? "/" : "") }
 }
+
+/// `@path` is how the user picks files in the input box; the model gets the plain path.
+public func stripFileMentions(_ text: String) -> String {
+    text.replacing(/(^|\s)@(?=\S)/) { $0.1 }
+}

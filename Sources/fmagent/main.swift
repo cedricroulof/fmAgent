@@ -49,7 +49,7 @@ let instructions = """
     (Markdown is fine); never use a tool to print or echo text. Use the runCommand tool only when you need real \
     information from the user's system or must change it, then answer from its output. Prefer one simple command \
     at a time. To create or edit a file, use the writeFile tool with the full content. If the user declines a \
-    command, do not retry it. Only claim something worked if the tool result confirms it. Words starting with @ are file paths. Current directory: \(FileManager.default.currentDirectoryPath)
+    command, do not retry it. Only claim something worked if the tool result confirms it. Current directory: \(FileManager.default.currentDirectoryPath)
     """
 
 // macOS 27 renamed the error; check both so the tool also runs on macOS 26.
@@ -99,7 +99,7 @@ while true {
     tui?.startWorking()
     var reply: String
     do {
-        reply = "● " + renderMarkdown(try await session.respond(to: prompt).content).replacingOccurrences(of: "\n", with: "\n  ")
+        reply = "● " + renderMarkdown(try await session.respond(to: stripFileMentions(prompt)).content).replacingOccurrences(of: "\n", with: "\n  ")
     } catch where isContextFull(error) {
         session = newSession()
         reply = "Context window full; session was reset. Please repeat your request."
