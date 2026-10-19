@@ -5,23 +5,6 @@ import FMAgentCore
 
 let autoApprove = CommandLine.arguments.contains("--yes")
 
-// libedit gives arrow-key editing, history and Tab filename completion; fall back to readLine when piped.
-// \u{1}...\u{2} mark the color codes as zero-width so the cursor position stays right.
-// shortcut: declared directly because a C module target breaks Swift Testing's macros with the Command Line Tools
-// toolchain; switch to a systemLibrary target once that's fixed.
-@_silgen_name("readline") func readline(_ prompt: UnsafePointer<CChar>) -> UnsafeMutablePointer<CChar>?
-@_silgen_name("add_history") @discardableResult func add_history(_ line: UnsafePointer<CChar>) -> Int32
-
-func input(_ prompt: String) -> String? {
-    guard isatty(0) != 0 else {
-        print(prompt.filter { $0 != "\u{1}" && $0 != "\u{2}" }, terminator: "")
-        return readLine()
-    }
-    guard let cLine = readline(prompt) else { return nil }
-    defer { free(cLine) }
-    return String(cString: cLine)
-}
-
 // `!command` runs on the user's terminal directly (interactive programs work) and is never sent to the model.
 // posix_spawn, not Process: Process puts the child in its own process group, so it would miss Ctrl-C and
 // interactive programs couldn't read the terminal.
@@ -37,9 +20,9 @@ func runDirect(_ command: String) {
     posix_spawnattr_setflags(&attr, Int16(POSIX_SPAWN_SETSIGDEF))
 
     // Like system(3): Ctrl-C stops the command, not fmagent
-    signal(SIGINT, SIG_IGN)
-    signal(SIGQUIT, SIG_IGN)
-    defer { signal(SIGINT, SIG_DFL); signal(SIGQUIT, SIG_DFL) }
+    let previousInt = signal(SIGINT, SIG_IGN)
+    let previousQuit = signal(SIGQUIT, SIG_IGN)
+    defer { signal(SIGINT, previousInt); signal(SIGQUIT, previousQuit) }
     fflush(stdout)  // print our pending output before the command's
 
     let argv = ["/bin/zsh", "-c", command].map { strdup($0) } + [nil]
@@ -57,14 +40,15 @@ func runDirect(_ command: String) {
 
 func approved(_ question: String) -> Bool {
     if autoApprove { return true }
-    return input("\(question) [y/N] ")?.lowercased().hasPrefix("y") == true
+    print("\(question) [y/N] ", terminator: "")
+    return readLine()?.lowercased().hasPrefix("y") == true
 }
 
 let instructions = """
     You are a terminal assistant on macOS. When the user asks about their system, files, or wants something done, \
     use the runCommand tool to run shell commands instead of guessing, then answer from the real output. \
     Prefer one simple command at a time. To create or edit a file, always use the writeFile tool with the full content. \
-    Only claim something worked if the tool result confirms it. Current directory: \(FileManager.default.currentDirectoryPath)
+    Only claim something worked if the tool result confirms it. Words starting with @ are file paths. Current directory: \(FileManager.default.currentDirectoryPath)
     """
 
 // macOS 27 renamed the error; check both so the tool also runs on macOS 26.
@@ -83,60 +67,42 @@ guard case .available = SystemLanguageModel.default.availability else {
     exit(1)
 }
 
-let isTTY = isatty(0) != 0 && isatty(1) != 0
-let (dim, bold, cyan, yellow, reset) = ("\u{1B}[2m", "\u{1B}[1m", "\u{1B}[36m", "\u{1B}[33m", "\u{1B}[0m")
-
-func terminalWidth() -> Int {
-    var size = winsize()
-    return ioctl(STDOUT_FILENO, TIOCGWINSZ, &size) == 0 && size.ws_col > 0 ? Int(size.ws_col) : 80
-}
-
-func printBanner() {
-    var cwd = FileManager.default.currentDirectoryPath
-    if cwd.hasPrefix(NSHomeDirectory()) { cwd = "~" + cwd.dropFirst(NSHomeDirectory().count) }
-    if isTTY { print("\u{1B}[2J\u{1B}[H", terminator: "") }
-    print("""
-
-        \(cyan)╭────╮\(reset)  \(bold)fmagent\(reset)
-        \(cyan)│ ❯_ │\(reset)  \(dim)Apple Foundation Model · on-device\(reset)
-        \(cyan)╰────╯\(reset)  \(dim)\(cwd)\(reset)
-
-        """)
-}
-
-// Draws the input box (rule, prompt line, rule, status) and puts the cursor on the prompt line.
-func readPrompt() -> String? {
-    guard isTTY else { return input("> ") }
-    let rule = dim + String(repeating: "─", count: terminalWidth()) + reset
-    let mode = autoApprove ? "\(yellow)▸▸ auto-approve on\(reset)\(dim)" : "\(dim)asks before running commands"
-    print("\(rule)\n\n\(rule)\n  \(mode) · ! for shell · /reset · ctrl-d to quit\(reset)\u{1B}[2A\r", terminator: "")
-    fflush(stdout)
-    let line = input("\u{1}\(bold)\u{2}❯ \u{1}\(reset)\u{2}")
-    print("\u{1B}[J", terminator: "")  // erase the bottom rule and status once Enter is pressed
-    return line
-}
-
+let tui: TerminalUI? = isatty(0) != 0 && isatty(1) != 0 ? TerminalUI(autoApprove: autoApprove) : nil
 var session = newSession()
-printBanner()
+if let tui { tui.start() } else { print("fmagent — on-device model with shell access. Ctrl-D to quit, /clear to reset.") }
+
 while true {
-    guard let line = readPrompt() else { break }
+    var line: String
+    var shell = false
+    if let tui {
+        guard let input = tui.read() else { break }
+        (line, shell) = input
+    } else {
+        print("> ", terminator: "")
+        guard let input = readLine() else { break }
+        line = input
+        if line.hasPrefix("!") { shell = true; line.removeFirst() }
+    }
     let prompt = line.trimmingCharacters(in: .whitespaces)
     if prompt.isEmpty { continue }
-    add_history(prompt)
-    if prompt.hasPrefix("!") {
-        runDirect(String(prompt.dropFirst()))
+    if shell { runDirect(prompt); continue }
+    if prompt == "/clear" || prompt == "/reset" {
+        session = newSession()
+        if let tui { tui.clearScreen() } else { print("Session cleared.") }
         continue
     }
-    if prompt == "/reset" { session = newSession(); print("Session cleared."); continue }
-    if isTTY { print("\(dim)✻ Thinking…\(reset)", terminator: ""); fflush(stdout) }
+
+    tui?.startWorking()
+    var reply: String
     do {
-        let reply = renderMarkdown(try await session.respond(to: prompt).content)
-        if isTTY { print("\r\u{1B}[K", terminator: "") }
-        print("\n● " + reply.replacingOccurrences(of: "\n", with: "\n  ") + "\n")
+        reply = "● " + renderMarkdown(try await session.respond(to: prompt).content).replacingOccurrences(of: "\n", with: "\n  ")
     } catch where isContextFull(error) {
         session = newSession()
-        print("Context window full; session was reset. Please repeat your request.")
+        reply = "Context window full; session was reset. Please repeat your request."
     } catch {
-        print("Error: \(error)")
+        reply = "Error: \(error)"
     }
+    tui?.stopWorking()
+    print("\n" + reply)
 }
+tui?.finish()

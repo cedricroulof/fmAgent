@@ -100,3 +100,34 @@ func tempPath(_ name: String) -> String {
     #expect(renderMarkdown("## Files") == "\u{1B}[1;4mFiles\u{1B}[0m")
     #expect(renderMarkdown("- one\n  * two") == "• one\n  • two")
 }
+
+func visible(_ s: String) -> String { s.replacing(/\u{1B}\[[0-9;]*m/, with: "") }
+
+@Test func appleFramesKeepTheirSizeWhileSpinning() {
+    for step in 0..<24 {
+        let lines = AppleLogo.frame(angle: Double(step) * .pi / 12)
+        #expect(lines.count == AppleLogo.height)
+        #expect(lines.allSatisfy { visible($0).count == AppleLogo.width })
+    }
+}
+
+@Test func appleFacingAwayIsMirrored() {
+    let front = AppleLogo.pixelGrid(angle: 0)
+    #expect(front == AppleLogo.pixels)
+    #expect(AppleLogo.pixelGrid(angle: .pi) == front.map { Array($0.reversed()) })
+}
+
+@Test func pathCompletionsListsDirectoriesFirstAndMatchesPrefix() throws {
+    let dir = tempPath("completion")
+    let fm = FileManager.default
+    try fm.createDirectory(atPath: dir + "/Sources/fmagent", withIntermediateDirectories: true)
+    for file in ["README.md", ".gitignore", "Sources/main.swift"] { fm.createFile(atPath: dir + "/" + file, contents: nil) }
+    defer { try? fm.removeItem(atPath: dir) }
+
+    #expect(pathCompletions(for: "", in: dir) == ["Sources/", ".gitignore", "README.md"])
+    #expect(pathCompletions(for: "re", in: dir) == ["README.md"])
+    #expect(pathCompletions(for: "Sources/", in: dir) == ["Sources/fmagent/", "Sources/main.swift"])
+    #expect(pathCompletions(for: "Sources/ma", in: dir) == ["Sources/main.swift"])
+    #expect(pathCompletions(for: "missing/", in: dir) == [])
+    #expect(pathCompletions(for: dir + "/RE", in: "/") == [dir + "/README.md"])
+}
