@@ -49,7 +49,7 @@ func tempPath(_ name: String) -> String {
 @Test func runCommandDeclinedDoesNotRun() async throws {
     let path = tempPath("declined")
     let result = try await RunCommand(approve: no).call(arguments: GeneratedContent(properties: ["command": "touch '\(path)'"]))
-    #expect(result == "The user declined to run this command.")
+    #expect(result == "The user declined to run this command. Do not run it again; answer without it.")
     #expect(!FileManager.default.fileExists(atPath: path))
 }
 
@@ -65,7 +65,7 @@ func tempPath(_ name: String) -> String {
 @Test func writeFileDeclinedDoesNotWrite() async throws {
     let path = tempPath("declined.txt")
     let result = try await WriteFile(approve: no).call(arguments: GeneratedContent(properties: ["path": path, "content": "x"]))
-    #expect(result == "The user declined to write this file.")
+    #expect(result == "The user declined to write this file. Do not write it again; answer without it.")
     #expect(!FileManager.default.fileExists(atPath: path))
 }
 
@@ -111,10 +111,9 @@ func visible(_ s: String) -> String { s.replacing(/\u{1B}\[[0-9;]*m/, with: "") 
     }
 }
 
-@Test func appleFacingAwayIsMirrored() {
-    let front = AppleLogo.pixelGrid(angle: 0)
-    #expect(front == AppleLogo.pixels)
-    #expect(AppleLogo.pixelGrid(angle: .pi) == front.map { Array($0.reversed()) })
+@Test func appleChangesAsItTurns() {
+    #expect(AppleLogo.frame(angle: 0) != AppleLogo.frame(angle: .pi / 2))
+    #expect(visible(AppleLogo.frame(angle: 0).joined()).filter { $0 != " " }.count > 200)  // the apple is drawn
 }
 
 @Test func pathCompletionsListsDirectoriesFirstAndMatchesPrefix() throws {
@@ -130,4 +129,11 @@ func visible(_ s: String) -> String { s.replacing(/\u{1B}\[[0-9;]*m/, with: "") 
     #expect(pathCompletions(for: "Sources/ma", in: dir) == ["Sources/main.swift"])
     #expect(pathCompletions(for: "missing/", in: dir) == [])
     #expect(pathCompletions(for: dir + "/RE", in: "/") == [dir + "/README.md"])
+}
+
+@Test func toolsCallWillRunBeforeWorking() async throws {
+    final class Flag: @unchecked Sendable { var called = false }
+    let flag = Flag()
+    _ = try await RunCommand(approve: no, willRun: { flag.called = true }).call(arguments: GeneratedContent(properties: ["command": "true"]))
+    #expect(flag.called)
 }

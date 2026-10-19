@@ -45,10 +45,11 @@ func approved(_ question: String) -> Bool {
 }
 
 let instructions = """
-    You are a terminal assistant on macOS. When the user asks about their system, files, or wants something done, \
-    use the runCommand tool to run shell commands instead of guessing, then answer from the real output. \
-    Prefer one simple command at a time. To create or edit a file, always use the writeFile tool with the full content. \
-    Only claim something worked if the tool result confirms it. Words starting with @ are file paths. Current directory: \(FileManager.default.currentDirectoryPath)
+    You are a terminal assistant on macOS. Answer questions, explanations and code examples directly in your reply \
+    (Markdown is fine); never use a tool to print or echo text. Use the runCommand tool only when you need real \
+    information from the user's system or must change it, then answer from its output. Prefer one simple command \
+    at a time. To create or edit a file, use the writeFile tool with the full content. If the user declines a \
+    command, do not retry it. Only claim something worked if the tool result confirms it. Words starting with @ are file paths. Current directory: \(FileManager.default.currentDirectoryPath)
     """
 
 // macOS 27 renamed the error; check both so the tool also runs on macOS 26.
@@ -58,8 +59,11 @@ func isContextFull(_ error: Error) -> Bool {
     return false
 }
 
+// Tool output could scroll the welcome apple, so it stops spinning first.
+let stopAppleAnimation: @Sendable () -> Void = { welcomeApple.settle() }
+
 func newSession() -> LanguageModelSession {
-    LanguageModelSession(tools: [RunCommand(approve: approved), WriteFile(approve: approved)], instructions: instructions)
+    LanguageModelSession(tools: [RunCommand(approve: approved, willRun: stopAppleAnimation), WriteFile(approve: approved, willRun: stopAppleAnimation)], instructions: instructions)
 }
 
 guard case .available = SystemLanguageModel.default.availability else {

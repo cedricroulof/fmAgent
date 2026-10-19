@@ -36,7 +36,7 @@ fmagent          # asks [y/N] before every command or file write
 fmagent --yes    # runs everything without asking — use with care
 ```
 
-In a terminal, fmagent runs full screen: a pixel apple at the top (it spins while the model is working), the conversation in the middle, and the input box pinned to the bottom.
+In a terminal, fmagent runs full screen with the input box pinned to the bottom. The welcome screen shows a 3D dotted apple that spins until your first prompt and while the model answers it; then the conversation scrolls it away (scrollback keeps everything).
 
 | Input | What it does |
 |-------|--------------|
@@ -44,8 +44,8 @@ In a terminal, fmagent runs full screen: a pixel apple at the top (it spins whil
 | `@path` | Opens a file picker above the box. ↑/↓ to move, Tab or Enter to insert, Esc to close. Picking a folder lists its content. |
 | Tab | Completes the file or folder name under the cursor (opens the picker when there are several matches). |
 | ↑ / ↓ | History. ←/→, Home/End, Ctrl-A/E/K/U/W edit the line. |
-| `/clear` | Clears the screen and starts a new conversation (`/reset` does the same). Ctrl-L only clears the screen. |
-| Ctrl-C / Ctrl-D | Clear the line / quit. |
+| `/clear` | Clears the screen (back to the welcome apple) and starts a new conversation (`/reset` does the same). Ctrl-L only clears the screen. |
+| Ctrl-C / Ctrl-D | Clear the line; on an empty line, quit. Ctrl-C while the model works also quits. |
 
 When input is piped (`echo '!ls' | fmagent`), it falls back to plain line-by-line mode.
 

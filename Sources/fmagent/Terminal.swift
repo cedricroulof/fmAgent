@@ -1,8 +1,7 @@
-// Full-screen terminal UI: pinned header with the apple, scrolling output, and an input box pinned to the bottom.
+// Full-screen terminal UI: the conversation scrolls above an input box pinned to the bottom.
 //
-//   rows 1…9      apple + title (spins while the model works)
-//   region        output scrolls here (DECSTBM scroll region)
-//   menu          @ file picker, up to 5 rows, only while open
+//   scroll region   welcome apple (spins until it may scroll away), then the conversation
+//   menu            @ file picker, up to 5 rows, only while open
 //   rule / ❯ input / rule / status
 import Foundation
 import FMAgentCore
@@ -24,7 +23,41 @@ func writeOut(_ s: String) {
     }
 }
 
-enum Key { case char(Character), enter, tab, backspace, delete, up, down, left, right, home, end, esc, ctrl(UInt8), resize, eof, none }
+/// The welcome apple. It may only be redrawn while nothing can have scrolled it, so it is `settle`d (turned to
+/// face front and left alone) before any output that could move it.
+final class WelcomeApple: @unchecked Sendable {
+    private let lock = NSLock()
+    private var row: Int?
+    private var tick = 0
+
+    func place(at row: Int?) { lock.withLock { self.row = row; tick = 0 } }
+    var isPlaced: Bool { lock.withLock { row != nil } }
+
+    func spin() {
+        lock.withLock {
+            guard let row else { return }
+            tick += 1
+            draw(row: row, angle: Double(tick) * .pi / 18)
+        }
+    }
+
+    func settle() {
+        lock.withLock {
+            guard let row else { return }
+            draw(row: row, angle: 0)
+            self.row = nil
+        }
+    }
+
+    private func draw(row: Int, angle: Double) {
+        let lines = AppleLogo.frame(angle: angle).enumerated().map { move(row + $0.offset, 3) + $0.element }
+        writeOut("\u{1B}7" + lines.joined() + "\u{1B}8")  // save/restore: output keeps flowing where it was
+    }
+}
+
+let welcomeApple = WelcomeApple()
+
+enum Key { case char(Character), enter, tab, backspace, delete, up, down, left, right, home, end, esc, ctrl(UInt8), resize, tick, eof, none }
 
 func readByte(timeoutMs: Int32 = -1) -> UInt8? {
     if timeoutMs >= 0 {
@@ -35,7 +68,14 @@ func readByte(timeoutMs: Int32 = -1) -> UInt8? {
     return Darwin.read(STDIN_FILENO, &byte, 1) == 1 ? byte : nil
 }
 
-func readKey() -> Key {
+/// With a timeout, returns `.tick` when no key arrives in time (used to animate).
+func readKey(timeoutMs: Int32 = -1) -> Key {
+    if timeoutMs >= 0 {
+        var fd = pollfd(fd: STDIN_FILENO, events: Int16(POLLIN), revents: 0)
+        let ready = poll(&fd, 1, timeoutMs)
+        if ready == 0 { return .tick }
+        if ready < 0 { return errno == EINTR ? .resize : .eof }
+    }
     guard let b = readByte() else { return errno == EINTR ? .resize : .eof }
     switch b {
     case 0x0D, 0x0A: return .enter
@@ -67,28 +107,25 @@ func readKey() -> Key {
     }
 }
 
-/// Animates the apple and the status line on a background queue while the model works.
+/// Animates the status line (and the welcome apple, while it is placed) on a background queue while the model works.
 final class Spinner: @unchecked Sendable {
     private let queue = DispatchQueue(label: "fmagent.spinner")
     private let timer: DispatchSourceTimer
     private var tick = 0
 
-    init(statusRow: Int, animateLogo: Bool) {
+    init(statusRow: Int) {
         timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now(), repeating: .milliseconds(70))
-        timer.setEventHandler { [unowned self] in draw(statusRow: statusRow, animateLogo: animateLogo) }
+        timer.setEventHandler { [unowned self] in draw(statusRow: statusRow) }
         timer.resume()
     }
 
-    private func draw(statusRow: Int, animateLogo: Bool) {
+    private func draw(statusRow: Int) {
         tick += 1
+        welcomeApple.spin()
         let glyphs = ["·", "✢", "✳", "✶", "✻", "✽", "✻", "✶", "✳", "✢"]
-        var s = "\u{1B}7"  // save cursor: output keeps flowing where it was
-        if animateLogo {
-            for (i, line) in AppleLogo.frame(angle: Double(tick) * .pi / 14).enumerated() { s += move(i + 2, 3) + line }
-        }
-        s += move(statusRow, 1) + clearLine + "  \(orange)\(glyphs[tick / 2 % glyphs.count]) Thinking…\(reset)"
-        writeOut(s + "\u{1B}8")
+        let status = move(statusRow, 1) + clearLine + "  \(orange)\(glyphs[tick / 2 % glyphs.count]) Thinking…\(reset)"
+        writeOut("\u{1B}7" + status + "\u{1B}8")
     }
 
     func stop() { queue.sync { timer.cancel() } }
@@ -96,7 +133,7 @@ final class Spinner: @unchecked Sendable {
 
 final class TerminalUI {
     let autoApprove: Bool
-    let headerText: [String]
+    let cwd: String
     var rows = 24, cols = 80
     var menuRows = 0
     var outRow = 1, outCol = 1  // where the next output line goes inside the scroll region
@@ -118,12 +155,10 @@ final class TerminalUI {
         self.autoApprove = autoApprove
         var cwd = FileManager.default.currentDirectoryPath
         if cwd.hasPrefix(NSHomeDirectory()) { cwd = "~" + cwd.dropFirst(NSHomeDirectory().count) }
-        headerText = ["", "", "\(bold)fmagent\(reset)", "\(dim)Apple Foundation Model · on-device\(reset)", "\(dim)\(cwd)\(reset)", "", ""]
+        self.cwd = cwd
         tcgetattr(STDIN_FILENO, &cooked)
     }
 
-    var headerHeight: Int { rows >= 20 ? AppleLogo.height + 2 : 0 }  // blank row above and below the apple
-    var regionTop: Int { headerHeight + 1 }
     var regionBottom: Int { rows - 4 - menuRows }
 
     func updateSize() {
@@ -132,7 +167,7 @@ final class TerminalUI {
     }
 
     func start() {
-        // Ctrl-C while the model works: put the terminal back before dying
+        // Ctrl-C while the model works: put the terminal back before quitting
         signal(SIGINT) { _ in
             let restore: StaticString = "\u{1B}[r\u{1B}[999;1H\r\n"
             restore.withUTF8Buffer { _ = Darwin.write(STDOUT_FILENO, $0.baseAddress, $0.count) }
@@ -144,28 +179,30 @@ final class TerminalUI {
 
     func finish() { writeOut("\u{1B}[r" + move(rows, 1) + "\r\n") }
 
+    /// Clears everything and shows the welcome screen: the apple, spinning until the first prompt.
     func clearScreen() {
         writeOut("\u{1B}[r\u{1B}[2J\u{1B}[H")
-        outRow = regionTop
-        outCol = 1
-        drawHeader()
+        menuRows = 0
+        (outRow, outCol) = (1, 1)
+        guard rows >= AppleLogo.height + 12 else { welcomeApple.place(at: nil); return }
+        let top = 2, mid = top + AppleLogo.height / 2, textCol = AppleLogo.width + 7
+        welcomeApple.place(at: top)
+        welcomeApple.settle()  // draw it once facing front…
+        welcomeApple.place(at: top)  // …and keep it animatable
+        writeOut(move(mid - 1, textCol) + "\(bold)fmagent\(reset)" + move(mid, textCol) + "\(dim)Apple Foundation Model · on-device\(reset)"
+            + move(mid + 1, textCol) + "\(dim)\(cwd)\(reset)")
+        outRow = top + AppleLogo.height + 1
+        writeOut(move(outRow, 1))  // the next read() takes the output position from the cursor
     }
 
-    func drawHeader(angle: Double = 0) {
-        guard headerHeight > 0 else { return }
-        var s = "\u{1B}7" + move(1, 1) + clearLine
-        for (i, line) in AppleLogo.frame(angle: angle).enumerated() { s += move(i + 2, 1) + clearLine + "  " + line + "   " + headerText[i] }
-        writeOut(s + move(headerHeight, 1) + clearLine + "\u{1B}8")
-    }
+    func setRegion() { writeOut("\u{1B}[1;\(regionBottom)r") }
 
-    func setRegion() { writeOut("\u{1B}[\(regionTop);\(regionBottom)r") }
-
-    func startWorking() { spinner = Spinner(statusRow: rows, animateLogo: headerHeight > 0) }
+    func startWorking() { spinner = Spinner(statusRow: rows) }
 
     func stopWorking() {
         spinner?.stop()
         spinner = nil
-        drawHeader()
+        welcomeApple.settle()  // the reply may scroll it away
         writeOut("\u{1B}7" + move(rows, 1) + clearLine + statusLine() + "\u{1B}8")
     }
 
@@ -193,30 +230,30 @@ final class TerminalUI {
         return numbers.count == 2 ? (numbers[0], numbers[1]) : nil
     }
 
-    /// Reads one line in the bottom box. Returns nil on Ctrl-D; `shell` is true for `!` commands.
+    /// Reads one line in the bottom box. Returns nil to quit; `shell` is true for `!` commands.
     func read() -> (text: String, shell: Bool)? {
         updateSize()
         enterRaw()
         if let (row, col) = cursorPosition() { (outRow, outCol) = (row, col) }
         menuRows = 0
-        if outRow < regionTop || outRow > regionBottom { (outRow, outCol) = (min(max(outRow, regionTop), regionBottom), 1) }
-        drawHeader()
+        if outRow > regionBottom { (outRow, outCol) = (regionBottom, 1) }
         setRegion()
         (buf, cur, shell, sel, forcedMenu, menuDismissed, histIdx) = ([], 0, false, 0, false, false, history.count)
 
         while true {
-            render()
-            let key = readKey()
+            render()  // also after each animation tick: puts the cursor back on the prompt explicitly
+            let key = readKey(timeoutMs: welcomeApple.isPlaced ? 70 : -1)
             if case .char = key { menuDismissed = false }
             if case .backspace = key { menuDismissed = false }
             switch key {
+            case .tick:
+                welcomeApple.spin()
             case .eof:
                 leaveRaw()
                 return nil
             case .resize:
                 updateSize()
                 outRow = min(outRow, regionBottom)
-                drawHeader()
                 setRegion()
             case .char("!") where buf.isEmpty && !shell:
                 shell = true
@@ -227,12 +264,13 @@ final class TerminalUI {
                 if ch == " " { forcedMenu = false }
             case .backspace:
                 if cur > 0 { buf.remove(at: cur - 1); cur -= 1; sel = 0 } else if buf.isEmpty { shell = false }
-            case .delete,
-                 .ctrl(4) where !buf.isEmpty:  // Ctrl-D deletes like Delete, and quits on an empty line
+            case .delete:
                 if cur < buf.count { buf.remove(at: cur) }
-            case .ctrl(4):
-                leaveRaw()
-                return nil
+            case .ctrl(3), .ctrl(4):  // Ctrl-C / Ctrl-D: clear the line, leave shell mode, then quit
+                if !buf.isEmpty { (buf, cur) = ([], 0) } else if shell { shell = false } else {
+                    leaveRaw()
+                    return nil
+                }
             case .left: cur = max(0, cur - 1)
             case .right: cur = min(buf.count, cur + 1)
             case .home, .ctrl(1): cur = 0
@@ -255,9 +293,6 @@ final class TerminalUI {
                 return submit()
             case .esc:
                 if !items.isEmpty { menuDismissed = true; forcedMenu = false } else if buf.isEmpty { shell = false }
-            case .ctrl(3):  // Ctrl-C clears the line
-                if buf.isEmpty { shell = false }
-                (buf, cur) = ([], 0)
             case .ctrl(11): buf.removeSubrange(cur...)  // Ctrl-K
             case .ctrl(21): buf.removeSubrange(..<cur); cur = 0  // Ctrl-U
             case .ctrl(23):  // Ctrl-W deletes the previous word
@@ -267,7 +302,6 @@ final class TerminalUI {
                 buf.removeSubrange(start..<cur)
                 cur = start
             case .ctrl(12):  // Ctrl-L
-                menuRows = 0
                 clearScreen()
                 setRegion()
             default: break
@@ -307,8 +341,10 @@ final class TerminalUI {
         render()
         leaveRaw()
         var s = move(outRow, outCol) + (outCol > 1 ? "\r\n" : "")
-        if outRow > regionTop { s += "\r\n" }
+        if outRow > 1 { s += "\r\n" }
         s += (wasShell ? "\(pink)!\(reset) " : "\(dim)❯\(reset) ") + text + "\r\n"
+        // a shell command's output, or a nearly full screen, could scroll the apple: stop animating it
+        if wasShell || regionBottom - outRow < 6 { welcomeApple.settle() }
         writeOut(s)
         history.append((wasShell ? "!" : "") + text)
         return (text, wasShell)
@@ -319,7 +355,7 @@ final class TerminalUI {
     func statusLine() -> String {
         if shell { return "  \(pink)! for shell mode\(reset)" }
         let mode = autoApprove ? "\(yellow)▸▸ auto-approve on\(reset)" : "\(dim)asks before running commands\(reset)"
-        return "  \(mode)\(dim) · ! for shell · @ for files · /clear · ctrl-d to quit\(reset)"
+        return "  \(mode)\(dim) · ! for shell · @ for files · /clear · ctrl-c to quit\(reset)"
     }
 
     /// Grows or shrinks the menu area above the box, scrolling output up first so nothing is drawn over.
@@ -328,6 +364,7 @@ final class TerminalUI {
         if count > menuRows {
             let overlap = outRow - (rows - 4 - count)
             if overlap > 0 {
+                welcomeApple.settle()
                 writeOut(move(regionBottom, 1) + String(repeating: "\n", count: overlap))
                 outRow -= overlap
             }
