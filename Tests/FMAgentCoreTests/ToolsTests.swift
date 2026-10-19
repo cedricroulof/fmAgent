@@ -81,3 +81,22 @@ func tempPath(_ name: String) -> String {
     let writeSchema = String(describing: WriteFile(approve: yes).parameters)
     #expect(writeSchema.contains("path") && writeSchema.contains("content"))
 }
+
+@Test func renderMarkdownStripsFencesAndColorsCode() {
+    let md = "Run this:\n```bash\npython3 sort.py 23 1 2322\n```\nDone."
+    #expect(renderMarkdown(md) == "Run this:\n  \u{1B}[32mpython3 sort.py 23 1 2322\u{1B}[39m\nDone.")
+}
+
+@Test func renderMarkdownDoesNotStyleInsideCodeBlocks() {
+    #expect(renderMarkdown("```\n- **x** `y`\n```") == "  \u{1B}[32m- **x** `y`\u{1B}[39m")
+}
+
+@Test func renderMarkdownInlineStyles() {
+    #expect(renderMarkdown("a **b** `c`") == "a \u{1B}[1mb\u{1B}[22m \u{1B}[36mc\u{1B}[39m")
+    #expect(renderMarkdown("2 * 3 * 4") == "2 * 3 * 4")
+}
+
+@Test func renderMarkdownHeadersAndBullets() {
+    #expect(renderMarkdown("## Files") == "\u{1B}[1;4mFiles\u{1B}[0m")
+    #expect(renderMarkdown("- one\n  * two") == "• one\n  • two")
+}

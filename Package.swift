@@ -6,7 +6,7 @@ let package = Package(
     platforms: [.macOS(.v26)],
     targets: [
         .target(name: "FMAgentCore"),
-        .executableTarget(name: "fmagent", dependencies: ["FMAgentCore"]),
+        .executableTarget(name: "fmagent", dependencies: ["FMAgentCore"], linkerSettings: [.linkedLibrary("edit")]),
         .testTarget(name: "FMAgentCoreTests", dependencies: ["FMAgentCore"]),
     ]
 )
