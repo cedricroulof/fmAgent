@@ -36,7 +36,7 @@ fmagent          # asks [y/N] before every command or file write
 fmagent --yes    # runs everything without asking — use with care
 ```
 
-In the chat, `/reset` starts a fresh conversation and Ctrl-D quits. The input line supports arrow-key editing, history (↑/↓) and Tab completion of file names and paths. Replies are rendered from Markdown: code blocks, headers, lists, **bold** and `inline code` are shown with terminal colors.
+In the chat, `/reset` starts a fresh conversation and Ctrl-D quits. Start a line with `!` to run it yourself in zsh (e.g. `!ls -la`, `!vim main.c`): it runs directly on your terminal, is never sent to the model, and Ctrl-C stops it without leaving fmagent. The input line supports arrow-key editing, history (↑/↓) and Tab completion of file names and paths. Replies are rendered from Markdown: code blocks, headers, lists, **bold** and `inline code` are shown with terminal colors.
 
 ## Tools given to the model
 

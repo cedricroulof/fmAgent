@@ -22,6 +22,39 @@ func input(_ prompt: String) -> String? {
     return String(cString: cLine)
 }
 
+// `!command` runs on the user's terminal directly (interactive programs work) and is never sent to the model.
+// posix_spawn, not Process: Process puts the child in its own process group, so it would miss Ctrl-C and
+// interactive programs couldn't read the terminal.
+func runDirect(_ command: String) {
+    var attr: posix_spawnattr_t?
+    posix_spawnattr_init(&attr)
+    defer { posix_spawnattr_destroy(&attr) }
+    var defaults = sigset_t()
+    sigemptyset(&defaults)
+    sigaddset(&defaults, SIGINT)
+    sigaddset(&defaults, SIGQUIT)
+    posix_spawnattr_setsigdefault(&attr, &defaults)
+    posix_spawnattr_setflags(&attr, Int16(POSIX_SPAWN_SETSIGDEF))
+
+    // Like system(3): Ctrl-C stops the command, not fmagent
+    signal(SIGINT, SIG_IGN)
+    signal(SIGQUIT, SIG_IGN)
+    defer { signal(SIGINT, SIG_DFL); signal(SIGQUIT, SIG_DFL) }
+    fflush(stdout)  // print our pending output before the command's
+
+    let argv = ["/bin/zsh", "-c", command].map { strdup($0) } + [nil]
+    defer { argv.forEach { free($0) } }
+    var pid: pid_t = 0
+    let err = posix_spawn(&pid, "/bin/zsh", nil, &attr, argv, environ)
+    guard err == 0 else { print("Error: \(String(cString: strerror(err)))"); return }
+
+    var status: Int32 = 0
+    while waitpid(pid, &status, 0) == -1 && errno == EINTR {}
+    let signaled = status & 0x7f
+    let code = signaled == 0 ? (status >> 8) & 0xff : 128 + signaled
+    if code != 0 { print("\u{1B}[2m(exit \(code))\u{1B}[0m") }
+}
+
 func approved(_ question: String) -> Bool {
     if autoApprove { return true }
     return input("\(question) [y/N] ")?.lowercased().hasPrefix("y") == true
@@ -58,6 +91,10 @@ while true {
     let prompt = line.trimmingCharacters(in: .whitespaces)
     if prompt.isEmpty { continue }
     add_history(prompt)
+    if prompt.hasPrefix("!") {
+        runDirect(String(prompt.dropFirst()))
+        continue
+    }
     if prompt == "/reset" { session = newSession(); print("Session cleared."); continue }
     do {
         print(renderMarkdown(try await session.respond(to: prompt).content))
