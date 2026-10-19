@@ -83,11 +83,43 @@ guard case .available = SystemLanguageModel.default.availability else {
     exit(1)
 }
 
+let isTTY = isatty(0) != 0 && isatty(1) != 0
+let (dim, bold, cyan, yellow, reset) = ("\u{1B}[2m", "\u{1B}[1m", "\u{1B}[36m", "\u{1B}[33m", "\u{1B}[0m")
+
+func terminalWidth() -> Int {
+    var size = winsize()
+    return ioctl(STDOUT_FILENO, TIOCGWINSZ, &size) == 0 && size.ws_col > 0 ? Int(size.ws_col) : 80
+}
+
+func printBanner() {
+    var cwd = FileManager.default.currentDirectoryPath
+    if cwd.hasPrefix(NSHomeDirectory()) { cwd = "~" + cwd.dropFirst(NSHomeDirectory().count) }
+    if isTTY { print("\u{1B}[2J\u{1B}[H", terminator: "") }
+    print("""
+
+        \(cyan)╭────╮\(reset)  \(bold)fmagent\(reset)
+        \(cyan)│ ❯_ │\(reset)  \(dim)Apple Foundation Model · on-device\(reset)
+        \(cyan)╰────╯\(reset)  \(dim)\(cwd)\(reset)
+
+        """)
+}
+
+// Draws the input box (rule, prompt line, rule, status) and puts the cursor on the prompt line.
+func readPrompt() -> String? {
+    guard isTTY else { return input("> ") }
+    let rule = dim + String(repeating: "─", count: terminalWidth()) + reset
+    let mode = autoApprove ? "\(yellow)▸▸ auto-approve on\(reset)\(dim)" : "\(dim)asks before running commands"
+    print("\(rule)\n\n\(rule)\n  \(mode) · ! for shell · /reset · ctrl-d to quit\(reset)\u{1B}[2A\r", terminator: "")
+    fflush(stdout)
+    let line = input("\u{1}\(bold)\u{2}❯ \u{1}\(reset)\u{2}")
+    print("\u{1B}[J", terminator: "")  // erase the bottom rule and status once Enter is pressed
+    return line
+}
+
 var session = newSession()
-print("fmagent — on-device model with shell access\(autoApprove ? " (auto-approve ON)" : ""). Ctrl-D to quit, /reset to clear.")
+printBanner()
 while true {
-    print()
-    guard let line = input("\u{1}\u{1B}[36m\u{2}> \u{1}\u{1B}[0m\u{2}") else { break }
+    guard let line = readPrompt() else { break }
     let prompt = line.trimmingCharacters(in: .whitespaces)
     if prompt.isEmpty { continue }
     add_history(prompt)
@@ -96,8 +128,11 @@ while true {
         continue
     }
     if prompt == "/reset" { session = newSession(); print("Session cleared."); continue }
+    if isTTY { print("\(dim)✻ Thinking…\(reset)", terminator: ""); fflush(stdout) }
     do {
-        print(renderMarkdown(try await session.respond(to: prompt).content))
+        let reply = renderMarkdown(try await session.respond(to: prompt).content)
+        if isTTY { print("\r\u{1B}[K", terminator: "") }
+        print("\n● " + reply.replacingOccurrences(of: "\n", with: "\n  ") + "\n")
     } catch where isContextFull(error) {
         session = newSession()
         print("Context window full; session was reset. Please repeat your request.")
