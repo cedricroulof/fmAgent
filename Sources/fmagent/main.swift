@@ -49,10 +49,59 @@ func runDirect(_ command: String) {
     if code != 0 { print("\u{1B}[2m(exit \(code))\u{1B}[0m") }
 }
 
+/// The model request in progress, so Ctrl-C can cancel it: the first press cancels, a second one quits.
+final class RequestCanceller: @unchecked Sendable {
+    enum Interrupt { case idle, cancelled, again }
+    private let lock = NSLock()
+    private var task: Task<String, Error>?
+    private var cancelled = false
+
+    var isCancelled: Bool { lock.withLock { cancelled } }
+    func begin(_ task: Task<String, Error>) { lock.withLock { (self.task, cancelled) = (task, false) } }
+    func end() { lock.withLock { (task, cancelled) = (nil, false) } }
+
+    func interrupt() -> Interrupt {
+        lock.withLock {
+            guard let task else { return .idle }
+            if cancelled { return .again }
+            cancelled = true
+            task.cancel()
+            return .cancelled
+        }
+    }
+}
+
+let canceller = RequestCanceller()
+
+// Ctrl-C is handled here instead of killing fmagent: it cancels the model's request, or does nothing when idle
+// (a `!` command gets it directly; the line editor reads it as a key).
+signal(SIGINT, SIG_IGN)
+let interrupts = DispatchSource.makeSignalSource(signal: SIGINT, queue: DispatchQueue(label: "fmagent.interrupt"))
+interrupts.setEventHandler(handler: onInterrupt)  // not a closure: one written here would be main-actor isolated and trap off the main thread
+interrupts.resume()
+
+@Sendable func onInterrupt() {
+    switch canceller.interrupt() {
+    case .idle: break
+    case .cancelled:
+        runningSpinner.stop()
+        welcomeApple.settle()
+        writeOut("\n\u{1B}[33mCancelling… (Ctrl-C again to quit)\u{1B}[0m\n")
+    case .again:
+        restoreTerminal()
+        exit(130)
+    }
+}
+
 func approved(_ question: String) -> Bool {
     if autoApprove { return true }
     print("\(question) [y/N] ", terminator: "")
-    return readLine()?.lowercased().hasPrefix("y") == true
+    guard isatty(STDIN_FILENO) != 0 else { return readLine()?.lowercased().hasPrefix("y") == true }
+    fflush(stdout)
+    let answer = readApprovalKey(isCancelled: { canceller.isCancelled })
+    print(answer == true ? "y" : "n")
+    if answer == nil { onInterrupt() }  // Ctrl-C at the question: raw mode delivers it as a key
+    return answer == true
 }
 
 let instructions = """
@@ -85,7 +134,8 @@ let stopAnimations: @Sendable () -> Void = {
 }
 
 func newSession() -> LanguageModelSession {
-    let context = ToolContext(workspace: workspace, approve: approved, willRun: stopAnimations, journal: journal, commandTimeout: commandTimeout)
+    let context = ToolContext(workspace: workspace, approve: approved, willRun: stopAnimations, journal: journal,
+                              commandTimeout: commandTimeout, isCancelled: { canceller.isCancelled })
     let tools: [any Tool] = [RunCommand(context), WriteFile(context), ReplaceText(context), ReadFile(context), ListDirectory(context), SearchFiles(context)]
     return LanguageModelSession(tools: tools, instructions: instructions)
 }
@@ -126,18 +176,24 @@ while true {
         continue
     }
 
-    let (message, attachmentNotes) = attachMentionedFiles(to: prompt, workspace: workspace)
+    let (attached, attachmentNotes) = attachMentionedFiles(to: prompt, workspace: workspace)
+    let message = withNotes(attached)
     for note in attachmentNotes { print("\u{1B}[2m  \(note)\u{1B}[0m") }
     tui?.startWorking()
+    let request = Task { [session] in try await session.respond(to: message).content }
+    canceller.begin(request)
     var reply: String
     do {
-        reply = "● " + renderMarkdown(try await session.respond(to: withNotes(message)).content).replacingOccurrences(of: "\n", with: "\n  ")
+        reply = "● " + renderMarkdown(try await request.value).replacingOccurrences(of: "\n", with: "\n  ")
+    } catch where canceller.isCancelled {
+        reply = "\u{1B}[33mCancelled.\u{1B}[0m"
     } catch where isContextFull(error) {
         session = newSession()
         reply = "Context window full; session was reset. Please repeat your request."
     } catch {
         reply = "Error: \(error)"
     }
+    canceller.end()
     tui?.stopWorking()
     print("\n" + reply)
 }

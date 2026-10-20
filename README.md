@@ -53,7 +53,7 @@ In a terminal, fmagent runs full screen with the input box pinned to the bottom.
 | ↑ / ↓ | History. ←/→, Home/End, Ctrl-A/E/K/U/W edit the line. |
 | `/undo` | Reverts the latest file change fmagent made (an edit, overwrite or new file). It only does so if the file is still exactly as fmagent left it; otherwise it refuses and keeps your changes. Repeat to go further back. The model is told on your next message. |
 | `/clear` | Clears the screen (back to the welcome apple) and starts a new conversation (`/reset` does the same). Ctrl-L only clears the screen. |
-| Ctrl-C / Ctrl-D | Clear the line; on an empty line, quit. Ctrl-C while the model works also quits. |
+| Ctrl-C / Ctrl-D | Clear the line; on an empty line, quit. While the model works, Ctrl-C cancels the request (and stops any command it is running) and brings back the input box with the conversation kept; press it again to quit. At a [y/N] question it cancels too. |
 
 When input is piped (`echo '!ls' | fmagent`), it falls back to plain line-by-line mode (each line is a separate message).
 
@@ -74,7 +74,7 @@ The on-device model has a context window of about 4k tokens. When it fills up, t
 
 ## Safety
 
-Every command and file write is shown before it runs and needs your approval, unless you pass `--yes`. Commands run with your user's permissions, and `writeFile` overwrites existing files. The model is small and sometimes picks the wrong command, so read before you approve.
+Every command and file write is shown before it runs and needs your approval (one key: `y` approves, anything else declines), unless you pass `--yes`. Commands run with your user's permissions, and `writeFile` overwrites existing files. The model is small and sometimes picks the wrong command, so read before you approve.
 
 ## Limitations
 

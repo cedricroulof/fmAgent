@@ -154,6 +154,26 @@ final class Spinner: @unchecked Sendable {
     func stop() { queue.sync { timer.cancel() } }
 }
 
+/// Puts the terminal back to normal (scroll region, paste mode, cursor at the bottom) before quitting abruptly.
+func restoreTerminal() { writeOut("\u{1B}[r\u{1B}[?2004l\u{1B}[999;1H\r\n") }
+
+/// Reads one key in raw mode for a yes/no question: y → true, any other key → false, Ctrl-C → nil.
+/// Gives up with false once `isCancelled` turns true, so a cancelled request never hangs on a question.
+func readApprovalKey(isCancelled: () -> Bool) -> Bool? {
+    var saved = termios()
+    tcgetattr(STDIN_FILENO, &saved)
+    var raw = saved
+    cfmakeraw(&raw)
+    tcsetattr(STDIN_FILENO, TCSANOW, &raw)
+    defer { tcsetattr(STDIN_FILENO, TCSANOW, &saved) }
+    while !isCancelled() {
+        guard let key = readStdinByte(timeoutMs: 100) else { continue }
+        if key == 3 { return nil }
+        return key == UInt8(ascii: "y") || key == UInt8(ascii: "Y")
+    }
+    return false
+}
+
 /// The running spinner, reachable from tool threads: it is stopped before a tool prints or asks for approval,
 /// so its background writes never interleave with tool output or the echo of the user's answer.
 final class SpinnerSlot: @unchecked Sendable {
@@ -211,12 +231,6 @@ final class TerminalUI {
     }
 
     func start() {
-        // Ctrl-C while the model works: put the terminal back before quitting
-        signal(SIGINT) { _ in
-            let restore: StaticString = "\u{1B}[r\u{1B}[?2004l\u{1B}[999;1H\r\n"
-            restore.withUTF8Buffer { _ = Darwin.write(STDOUT_FILENO, $0.baseAddress, $0.count) }
-            _exit(130)
-        }
         updateSize()
         clearScreen()
     }
