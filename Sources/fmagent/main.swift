@@ -11,6 +11,7 @@ let commandTimeout = CommandLine.arguments.firstIndex(of: "--timeout").flatMap {
 let workspace = Workspace()
 let journal = EditJournal()
 let taskLog = TaskLog()
+var lastShell: ShellRecord?  // the latest !command, shared with the model only by /explain-last or /fix-last
 var notesForModel: [String] = []  // things that happened outside the model's view, told with the next prompt
 // Terminal.app's session restore prints "Restored session…" around every interactive zsh started for `!` commands
 setenv("SHELL_SESSIONS_DISABLE", "1", 1)
@@ -18,7 +19,9 @@ setenv("SHELL_SESSIONS_DISABLE", "1", 1)
 // `!command` runs on the user's terminal directly (interactive programs work) and is never sent to the model.
 // posix_spawn, not Process: Process puts the child in its own process group, so it would miss Ctrl-C and
 // interactive programs couldn't read the terminal.
-func runDirect(_ command: String) {
+// It runs under script(1), which gives it a real terminal while recording the output to a private temporary file;
+// the end of that output is kept in memory (never on disk) for /explain-last and /fix-last.
+func runDirect(_ command: String) -> ShellRecord? {
     var attr: posix_spawnattr_t?
     posix_spawnattr_init(&attr)
     defer { posix_spawnattr_destroy(&attr) }
@@ -35,19 +38,37 @@ func runDirect(_ command: String) {
     defer { signal(SIGINT, previousInt); signal(SIGQUIT, previousQuit) }
     fflush(stdout)  // print our pending output before the command's
 
+    let log = NSTemporaryDirectory() + "fmagent-\(UUID().uuidString).log"
+    FileManager.default.createFile(atPath: log, contents: nil, attributes: [.posixPermissions: 0o600])
+    defer { try? FileManager.default.removeItem(atPath: log) }
+    var actions: posix_spawn_file_actions_t?
+    posix_spawn_file_actions_init(&actions)
+    defer { posix_spawn_file_actions_destroy(&actions) }
+    // piped input belongs to fmagent's next lines, not to the command
+    if isatty(STDIN_FILENO) == 0 { posix_spawn_file_actions_addopen(&actions, 0, "/dev/null", O_RDONLY, 0) }
+
     // -i loads ~/.zshrc so the user's aliases and functions work; +m turns off job control, which would move the
     // command to its own process group and break Ctrl-C handling here
-    let argv = ["/bin/zsh", "-i", "+m", "-c", command].map { strdup($0) } + [nil]
+    // "exit $?" keeps zsh from exec-ing the command itself: script(1) reports a signal-killed child as the bare
+    // signal number (2 for Ctrl-C), while zsh reports 130
+    let argv = ["/usr/bin/script", "-q", "-e", log, "/bin/zsh", "-i", "+m", "-c", command + "\nexit $?"].map { strdup($0) } + [nil]
     defer { argv.forEach { free($0) } }
     var pid: pid_t = 0
-    let err = posix_spawn(&pid, "/bin/zsh", nil, &attr, argv, environ)
-    guard err == 0 else { print("Error: \(String(cString: strerror(err)))"); return }
+    let err = posix_spawn(&pid, "/usr/bin/script", &actions, &attr, argv, environ)
+    guard err == 0 else { print("Error: \(String(cString: strerror(err)))"); return nil }
 
     var status: Int32 = 0
     while waitpid(pid, &status, 0) == -1 && errno == EINTR {}
     let signaled = status & 0x7f
     let code = signaled == 0 ? (status >> 8) & 0xff : 128 + signaled
     if code != 0 { print("\u{1B}[2m(exit \(code))\u{1B}[0m") }
+
+    let handle = FileHandle(forReadingAtPath: log)
+    defer { try? handle?.close() }
+    let size = (try? handle?.seekToEnd()) ?? 0
+    try? handle?.seek(toOffset: size > 65_536 ? size - 65_536 : 0)  // only the end matters
+    let output = cleanTerminalOutput((try? handle?.readToEnd()) ?? Data())
+    return ShellRecord(command: command, folder: (workspace.root as NSString).lastPathComponent, exitCode: code, output: output)
 }
 
 /// The model request in progress, so Ctrl-C can cancel it: the first press cancels, a second one quits.
@@ -197,9 +218,18 @@ while true {
         line = input
         if line.hasPrefix("!") { shell = true; line.removeFirst() }
     }
-    let prompt = line.trimmingCharacters(in: .whitespaces)
+    var prompt = line.trimmingCharacters(in: .whitespaces)
     if prompt.isEmpty { continue }
-    if shell { runDirect(prompt); continue }
+    if shell {
+        lastShell = runDirect(prompt)
+        continue
+    }
+    if prompt == "/explain-last" || prompt == "/fix-last" {
+        guard let record = lastShell else { print("\u{1B}[33mNo shell command yet: run one with ! first.\u{1B}[0m"); continue }
+        let lines = record.output.map { $0.isEmpty ? 0 : $0.split(separator: "\n").count } ?? 0
+        print("\u{1B}[2m  sharing `\(record.command)` (exit \(record.exitCode), \(record.output == nil ? "output not captured" : "\(lines) lines of output")) with the model\u{1B}[0m")
+        prompt = record.request(fix: prompt == "/fix-last")
+    }
     if prompt == "/undo" {
         let (message, undone) = journal.undoLatest()
         print((undone ? "" : "\u{1B}[33m") + message + "\u{1B}[0m")
@@ -211,6 +241,7 @@ while true {
     }
     if prompt == "/clear" || prompt == "/reset" {
         taskLog.clear()
+        lastShell = nil
         session = newSession()
         if let tui { tui.clearScreen() } else { print("Session cleared.") }
         continue
