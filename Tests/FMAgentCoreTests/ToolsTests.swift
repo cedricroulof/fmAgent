@@ -42,13 +42,13 @@ func tempPath(_ name: String) -> String {
 }
 
 @Test func runCommandReturnsExitCodeAndOutput() async throws {
-    let result = try await RunCommand(approve: yes).call(arguments: GeneratedContent(properties: ["command": "echo hi"]))
+    let result = try await RunCommand(ToolContext(approve: yes)).call(arguments: GeneratedContent(properties: ["command": "echo hi"]))
     #expect(result == "exit code: 0\nhi\n")
 }
 
 @Test func runCommandDeclinedDoesNotRun() async throws {
     let path = tempPath("declined")
-    let result = try await RunCommand(approve: no).call(arguments: GeneratedContent(properties: ["command": "touch '\(path)'"]))
+    let result = try await RunCommand(ToolContext(approve: no)).call(arguments: GeneratedContent(properties: ["command": "touch '\(path)'"]))
     #expect(result == "The user declined to run this command. Do not run it again; answer without it.")
     #expect(!FileManager.default.fileExists(atPath: path))
 }
@@ -57,28 +57,28 @@ func tempPath(_ name: String) -> String {
     let path = tempPath("main.c")
     defer { try? FileManager.default.removeItem(atPath: path) }
     let code = "#include <stdio.h>\n\nint main() {\n    printf(\"Hello, world!\\n\");\n    return 0;\n}\n"
-    let result = try await WriteFile(approve: yes).call(arguments: GeneratedContent(properties: ["path": path, "content": code]))
+    let result = try await WriteFile(ToolContext(approve: yes)).call(arguments: GeneratedContent(properties: ["path": path, "content": code]))
     #expect(result == "Wrote \(code.utf8.count) bytes to \(path).")
     #expect(try String(contentsOfFile: path, encoding: .utf8) == code)
 }
 
 @Test func writeFileDeclinedDoesNotWrite() async throws {
     let path = tempPath("declined.txt")
-    let result = try await WriteFile(approve: no).call(arguments: GeneratedContent(properties: ["path": path, "content": "x"]))
+    let result = try await WriteFile(ToolContext(approve: no)).call(arguments: GeneratedContent(properties: ["path": path, "content": "x"]))
     #expect(result == "The user declined to write this file. Do not write it again; answer without it.")
     #expect(!FileManager.default.fileExists(atPath: path))
 }
 
 @Test func writeFileReportsFailure() async throws {
-    let result = try await WriteFile(approve: yes).call(arguments: GeneratedContent(properties: ["path": "/nonexistent-dir/x.txt", "content": "x"]))
+    let result = try await WriteFile(ToolContext(approve: yes)).call(arguments: GeneratedContent(properties: ["path": "/nonexistent-dir/x.txt", "content": "x"]))
     #expect(result.hasPrefix("Failed to write /nonexistent-dir/x.txt"))
 }
 
 @Test func toolSchemasExposeExpectedArguments() {
-    #expect(RunCommand(approve: yes).name == "runCommand")
-    #expect(WriteFile(approve: yes).name == "writeFile")
-    #expect(String(describing: RunCommand(approve: yes).parameters).contains("command"))
-    let writeSchema = String(describing: WriteFile(approve: yes).parameters)
+    #expect(RunCommand(ToolContext(approve: yes)).name == "runCommand")
+    #expect(WriteFile(ToolContext(approve: yes)).name == "writeFile")
+    #expect(String(describing: RunCommand(ToolContext(approve: yes)).parameters).contains("command"))
+    let writeSchema = String(describing: WriteFile(ToolContext(approve: yes)).parameters)
     #expect(writeSchema.contains("path") && writeSchema.contains("content"))
 }
 
@@ -134,14 +134,14 @@ func visible(_ s: String) -> String { s.replacing(/\u{1B}\[[0-9;]*m/, with: "") 
 @Test func toolsCallWillRunBeforeWorking() async throws {
     final class Flag: @unchecked Sendable { var called = false }
     let flag = Flag()
-    _ = try await RunCommand(approve: no, willRun: { flag.called = true }).call(arguments: GeneratedContent(properties: ["command": "true"]))
+    _ = try await RunCommand(ToolContext(approve: no, willRun: { flag.called = true })).call(arguments: GeneratedContent(properties: ["command": "true"]))
     #expect(flag.called)
 }
 
 @Test func writeFileCreatesMissingDirectories() async throws {
     let dir = tempPath("project")
     defer { try? FileManager.default.removeItem(atPath: dir) }
-    _ = try await WriteFile(approve: yes).call(arguments: GeneratedContent(properties: ["path": dir + "/src/main.rs", "content": "fn main() {}\n"]))
+    _ = try await WriteFile(ToolContext(approve: yes)).call(arguments: GeneratedContent(properties: ["path": dir + "/src/main.rs", "content": "fn main() {}\n"]))
     #expect(try String(contentsOfFile: dir + "/src/main.rs", encoding: .utf8) == "fn main() {}\n")
 }
 

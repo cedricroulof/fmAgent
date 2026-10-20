@@ -4,6 +4,7 @@ import FoundationModels
 import FMAgentCore
 
 let autoApprove = CommandLine.arguments.contains("--yes")
+let workspace = Workspace()
 // Terminal.app's session restore prints "Restored session…" around every interactive zsh started for `!` commands
 setenv("SHELL_SESSIONS_DISABLE", "1", 1)
 
@@ -52,8 +53,9 @@ let instructions = """
     You are a terminal assistant on macOS. Answer questions, explanations and code examples directly in your reply \
     (Markdown is fine); never use a tool to print or echo text. Use the runCommand tool only when you need real \
     information from the user's system or must change it, then answer from its output. Prefer one simple command \
-    at a time. To create or edit a file, use the writeFile tool with the full content. If the user declines a \
-    command, do not retry it. Only claim something worked if the tool result confirms it. Current directory: \(FileManager.default.currentDirectoryPath)
+    at a time. To look at files use readFile, listDirectory and searchFiles, not cat, ls or grep. To create or \
+    edit a file, use the writeFile tool with the full content. If the user declines a \
+    command, do not retry it. Only claim something worked if the tool result confirms it. Current directory: \(workspace.root)
     """
 
 // macOS 27 renamed the error; check both so the tool also runs on macOS 26.
@@ -70,7 +72,9 @@ let stopAnimations: @Sendable () -> Void = {
 }
 
 func newSession() -> LanguageModelSession {
-    LanguageModelSession(tools: [RunCommand(approve: approved, willRun: stopAnimations), WriteFile(approve: approved, willRun: stopAnimations)], instructions: instructions)
+    let context = ToolContext(workspace: workspace, approve: approved, willRun: stopAnimations)
+    let tools: [any Tool] = [RunCommand(context), WriteFile(context), ReadFile(context), ListDirectory(context), SearchFiles(context)]
+    return LanguageModelSession(tools: tools, instructions: instructions)
 }
 
 guard case .available = SystemLanguageModel.default.availability else {
@@ -78,7 +82,7 @@ guard case .available = SystemLanguageModel.default.availability else {
     exit(1)
 }
 
-let tui: TerminalUI? = isatty(0) != 0 && isatty(1) != 0 ? TerminalUI(autoApprove: autoApprove) : nil
+let tui: TerminalUI? = isatty(0) != 0 && isatty(1) != 0 ? TerminalUI(autoApprove: autoApprove, workspace: workspace) : nil
 var session = newSession()
 if let tui { tui.start() } else { print("fmagent — on-device model with shell access. Ctrl-D to quit, /clear to reset.") }
 

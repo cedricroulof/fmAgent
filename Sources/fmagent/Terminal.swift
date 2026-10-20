@@ -170,6 +170,7 @@ let runningSpinner = SpinnerSlot()
 
 final class TerminalUI {
     let autoApprove: Bool
+    let workspace: Workspace
     let cwd: String
     var rows = 24, cols = 80
     var menuRows = 0
@@ -188,9 +189,10 @@ final class TerminalUI {
     var histIdx = 0
     var pastes = PasteStore()
 
-    init(autoApprove: Bool) {
+    init(autoApprove: Bool, workspace: Workspace) {
         self.autoApprove = autoApprove
-        var cwd = FileManager.default.currentDirectoryPath
+        self.workspace = workspace
+        var cwd = workspace.root
         if cwd.hasPrefix(NSHomeDirectory()) { cwd = "~" + cwd.dropFirst(NSHomeDirectory().count) }
         self.cwd = cwd
         tcgetattr(STDIN_FILENO, &cooked)
@@ -335,7 +337,7 @@ final class TerminalUI {
                 }
             case .tab:
                 if !items.isEmpty { accept() } else {
-                    let matches = pathCompletions(for: currentToken().text)
+                    let matches = pathCompletions(for: currentToken().text, in: workspace.root)
                     if matches.count == 1 { items = matches; sel = 0; accept() } else if matches.count > 1 { forcedMenu = true }
                 }
             case .enter:
@@ -429,8 +431,8 @@ final class TerminalUI {
     func render() {
         let token = currentToken().text
         if menuDismissed { items = [] }
-        else if token.hasPrefix("@") { items = pathCompletions(for: String(token.dropFirst())) }
-        else if forcedMenu { items = pathCompletions(for: token) }
+        else if token.hasPrefix("@") { items = pathCompletions(for: String(token.dropFirst()), in: workspace.root) }
+        else if forcedMenu { items = pathCompletions(for: token, in: workspace.root) }
         else { items = [] }
         if sel >= items.count { sel = 0 }
         setMenuRows(min(items.count, 5))
