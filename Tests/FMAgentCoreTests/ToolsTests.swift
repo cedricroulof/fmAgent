@@ -65,7 +65,7 @@ func tempPath(_ name: String) -> String {
 @Test func writeFileDeclinedDoesNotWrite() async throws {
     let path = tempPath("declined.txt")
     let result = try await WriteFile(ToolContext(approve: no)).call(arguments: GeneratedContent(properties: ["path": path, "content": "x"]))
-    #expect(result == "The user declined to write this file. Do not write it again; answer without it.")
+    #expect(result == "The user declined this change; nothing was written. Do not retry it; answer without it.")
     #expect(!FileManager.default.fileExists(atPath: path))
 }
 

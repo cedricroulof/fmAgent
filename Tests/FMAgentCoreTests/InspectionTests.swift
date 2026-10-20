@@ -27,8 +27,8 @@ func makeTree(_ name: String, _ files: [String: String]) throws -> String {
     let dir = try makeTree("read", ["f.txt": (1...10).map { "line \($0)" }.joined(separator: "\n") + "\n"])
     defer { try? FileManager.default.removeItem(atPath: dir) }
     #expect(readFileExcerpt(dir + "/f.txt", shown: "f.txt", startLine: 3, lineCount: 2)
-        == "f.txt, lines 3-4 of 10:\n3| line 3\n4| line 4\n[more: readFile startLine 5]")
-    #expect(readFileExcerpt(dir + "/f.txt", shown: "f.txt", startLine: 9) == "f.txt, lines 9-10 of 10:\n9| line 9\n10| line 10")
+        == "f.txt, lines 3-4 of 10:\n3\tline 3\n4\tline 4\n[more: readFile startLine 5]")
+    #expect(readFileExcerpt(dir + "/f.txt", shown: "f.txt", startLine: 9) == "f.txt, lines 9-10 of 10:\n9\tline 9\n10\tline 10")
     #expect(readFileExcerpt(dir + "/f.txt", shown: "f.txt", startLine: 11) == "f.txt has 10 lines; startLine 11 is past the end.")
 }
 
@@ -37,7 +37,7 @@ func makeTree(_ name: String, _ files: [String: String]) throws -> String {
     let dir = try makeTree("bounds", ["long.txt": long + "\nshort\n", "many.txt": (1...500).map { "row \($0)" }.joined(separator: "\n")])
     defer { try? FileManager.default.removeItem(atPath: dir) }
     let one = readFileExcerpt(dir + "/long.txt", shown: "long.txt")
-    #expect(one.contains("1| " + String(repeating: "x", count: InspectionLimits.lineChars) + " … [+4600 chars]"))
+    #expect(one.contains("1\t" + String(repeating: "x", count: InspectionLimits.lineChars) + " … [+4600 chars]"))
     #expect(one.utf8.count < 1_000)
     let many = readFileExcerpt(dir + "/many.txt", shown: "many.txt", lineCount: 500)
     #expect(many.hasPrefix("many.txt, lines 1-120 of 500:"))
@@ -84,6 +84,7 @@ func makeTree(_ name: String, _ files: [String: String]) throws -> String {
     #expect(searchFiles("total", in: dir, maxResults: 1).hasSuffix("[2 more matches not shown]"))
     #expect(searchFiles("total", in: dir, maxFiles: 1).contains("[stopped after scanning 1 files"))
     #expect(searchFiles("nothing", in: dir, shown: "proj") == "No matches for \"nothing\" in proj.")
+    #expect(searchFiles("APP.sw", in: dir, display: workspace.display) == "Sources/app.swift: file name matches")
     #expect(searchFiles("total", in: dir + "/Sources/app.swift", display: workspace.display).hasPrefix("Sources/app.swift:1:"))
     let big = dir + "/big.txt"
     try String(repeating: "total\n", count: InspectionLimits.searchFileBytes / 6 + 1).write(toFile: big, atomically: true, encoding: .utf8)
@@ -96,7 +97,7 @@ func makeTree(_ name: String, _ files: [String: String]) throws -> String {
     defer { try? FileManager.default.removeItem(atPath: dir) }
     let context = ToolContext(workspace: Workspace(root: dir), approve: no)
     let read = try await ReadFile(context).call(arguments: GeneratedContent(properties: ["path": "notes/a b.txt"]))
-    #expect(read == "notes/a b.txt, lines 1-1 of 1:\n1| hello")
+    #expect(read == "notes/a b.txt, lines 1-1 of 1:\n1\thello")
     let list = try await ListDirectory(context).call(arguments: GeneratedContent(properties: ["path": "notes"]))
     #expect(list == "notes (1 entries):\na b.txt")
     let found = try await SearchFiles(context).call(arguments: GeneratedContent(properties: ["query": "HELLO"]))

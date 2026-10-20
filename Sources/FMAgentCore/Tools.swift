@@ -44,7 +44,7 @@ public struct WriteFile: Tool {
     public init(_ context: ToolContext) { self.context = context }
 
     public let name = "writeFile"
-    public let description = "Create or overwrite a text file with the given content. Use this instead of shell commands to write files."
+    public let description = "Create a new text file, or rewrite a whole file, with the given content."
     public let parameters = schema("WriteFileArguments", [
         text("path", "File path, relative to the current directory or absolute"),
         text("content", "The full text content of the file"),
@@ -53,18 +53,56 @@ public struct WriteFile: Tool {
     public func call(arguments: GeneratedContent) async throws -> String {
         let path = try arguments.value(String.self, forProperty: "path")
         let content = try arguments.value(String.self, forProperty: "content")
-        let target = context.workspace.resolve(path)
         context.willRun()
-        print("\n\u{1B}[33m write \(path):\u{1B}[0m\n\u{1B}[2m\(content)\u{1B}[0m")
-        guard context.approve("Write this file?") else { return "The user declined to write this file. Do not write it again; answer without it." }
-        do {
-            try FileManager.default.createDirectory(atPath: (target as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
-            try content.write(toFile: target, atomically: true, encoding: .utf8)
-            return "Wrote \(content.utf8.count) bytes to \(path)."
-        } catch {
-            let message = "Failed to write \(path): \(error.localizedDescription)"
-            print("\u{1B}[31m\(message)\u{1B}[0m")
-            return message
+        switch proposeWrite(at: context.workspace.resolve(path), shown: path, content: content) {
+        case .failure(let error): return failed(error.message)
+        case .success(let edit) where edit.original == nil:
+            print("\n\u{1B}[33m create \(path):\u{1B}[0m\n\u{1B}[2m\(content)\u{1B}[0m")
+            return confirm(edit, context, question: "Write this file?", done: "Wrote \(content.utf8.count) bytes to \(path).")
+        case .success(let edit):
+            print("\n\u{1B}[33m overwrite \(path):\u{1B}[0m\n" + coloredDiff(edit.diff))
+            return confirm(edit, context, question: "Overwrite this file?", done: "Overwrote \(path) (\(content.utf8.count) bytes).")
+        }
+    }
+}
+
+func failed(_ message: String) -> String {
+    print("\u{1B}[31m\(message)\u{1B}[0m")
+    return message
+}
+
+/// Asks before writing a previewed edit; a declined or stale edit leaves the file untouched.
+func confirm(_ edit: EditProposal, _ context: ToolContext, question: String, done: String) -> String {
+    guard context.approve(question) else { return "The user declined this change; nothing was written. Do not retry it; answer without it." }
+    switch apply(edit) {
+    case .failure(let error): return failed(error.message)
+    case .success: return done
+    }
+}
+
+/// Changes one exact piece of a file, previewed as a diff.
+public struct ReplaceText: Tool {
+    public let context: ToolContext
+    public init(_ context: ToolContext) { self.context = context }
+
+    public let name = "replaceText"
+    public let description = "Change part of a file: replace oldText, copied exactly from readFile and found once, with newText."
+    public let parameters = schema("ReplaceTextArguments", [
+        text("path", "File path"),
+        text("oldText", "The exact current text to replace, with enough lines to be unique"),
+        text("newText", "The replacement text"),
+    ])
+
+    public func call(arguments: GeneratedContent) async throws -> String {
+        let path = try arguments.value(String.self, forProperty: "path")
+        let oldText = try arguments.value(String.self, forProperty: "oldText")
+        let newText = try arguments.value(String.self, forProperty: "newText")
+        context.willRun()
+        switch proposeReplacement(at: context.workspace.resolve(path), shown: path, oldText: oldText, newText: newText) {
+        case .failure(let error): return failed(error.message)
+        case .success(let edit):
+            print("\n\u{1B}[33m edit \(path):\u{1B}[0m\n" + coloredDiff(edit.diff))
+            return confirm(edit, context, question: "Apply this edit?", done: "Edited \(path).")
         }
     }
 }
@@ -137,7 +175,7 @@ public struct SearchFiles: Tool {
     public init(_ context: ToolContext) { self.context = context }
 
     public let name = "searchFiles"
-    public let description = "Find lines containing some text in the files under a folder. Use it instead of grep."
+    public let description = "Find files whose name or lines contain some text, under a folder. Use it instead of grep or find."
     public let parameters = schema("SearchFilesArguments", [
         text("query", "Text to find (not a regex, case-insensitive)"),
         text("path", "Folder or file to search; defaults to the current directory", optional: true),
