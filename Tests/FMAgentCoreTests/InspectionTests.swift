@@ -103,3 +103,19 @@ func makeTree(_ name: String, _ files: [String: String]) throws -> String {
     let found = try await SearchFiles(context).call(arguments: GeneratedContent(properties: ["query": "HELLO"]))
     #expect(found == "notes/a b.txt:1: hello")
 }
+
+@Test func changingTheWorkspaceMovesEveryPathResolution() throws {
+    let dir = try makeTree("cd", ["sub dir/é.txt": "x", "file.txt": "y"])
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let workspace = Workspace(root: dir)
+    #expect(try workspace.change(to: "sub dir").get().hasSuffix("/sub dir"))
+    #expect(workspace.resolve("é.txt") == (dir as NSString).standardizingPath + "/sub dir/é.txt")
+    #expect(listDirectory(workspace.resolve("."), shown: ".") == ". (1 entries):\né.txt")
+    #expect(throws: InspectionError.self) { try workspace.change(to: "missing").get() }
+    #expect(throws: InspectionError.self) { try workspace.change(to: "../file.txt").get() }
+    #expect(workspace.root.hasSuffix("/sub dir"))  // unchanged by the failed moves
+    #expect(try workspace.change(to: "..").get() == Workspace.tilde((dir as NSString).standardizingPath))
+    #expect(try workspace.change(to: "").get() == "~")
+    #expect(Workspace.tilde(NSHomeDirectory() + "/code") == "~/code")
+    #expect(Workspace.tilde("/tmp") == "/tmp")
+}
