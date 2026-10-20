@@ -21,11 +21,34 @@ public final class Workspace: @unchecked Sendable {
         return (absolute as NSString).standardizingPath
     }
 
+    /// `/cd <path>`: moves the workspace to an existing folder (home when `path` is empty).
+    /// Returns the new folder for display, with `~` for the home folder.
+    public func change(to path: String) -> Result<String, InspectionError> {
+        let target = path.isEmpty ? NSHomeDirectory() : resolve(path)
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: target, isDirectory: &isDir) else { return .failure(.init("No such folder: \(path)")) }
+        guard isDir.boolValue else { return .failure(.init("\(path) is a file, not a folder")) }
+        guard FileManager.default.isReadableFile(atPath: target) else { return .failure(.init("Can't open \(path): permission denied")) }
+        root = target
+        return .success(Workspace.tilde(target))
+    }
+
+    /// A path with the home folder written `~`.
+    public static func tilde(_ path: String) -> String {
+        path == NSHomeDirectory() || path.hasPrefix(NSHomeDirectory() + "/") ? "~" + path.dropFirst(NSHomeDirectory().count) : path
+    }
+
     /// How to show a resolved path: relative to the workspace when inside it.
     public func display(_ absolute: String) -> String {
         let base = root.hasSuffix("/") ? root : root + "/"
         return absolute.hasPrefix(base) ? String(absolute.dropFirst(base.count)) : absolute
     }
+}
+
+/// Whether a `!` command is just `cd [path]`. Anything more (`cd x && make`, `cd x` then `pwd` on the next line)
+/// goes to zsh as written.
+public func isStandaloneCd(_ command: String) -> Bool {
+    (command == "cd" || command.hasPrefix("cd ")) && command.rangeOfCharacter(from: CharacterSet(charactersIn: ";&|<>`$()\n\r")) == nil
 }
 
 /// What every tool needs from the app: where paths resolve, how to ask the user, a hook run before output, and

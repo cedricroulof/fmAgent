@@ -46,6 +46,7 @@ func runDirect(_ command: String) -> ShellRecord? {
     defer { posix_spawn_file_actions_destroy(&actions) }
     // piped input belongs to fmagent's next lines, not to the command
     if isatty(STDIN_FILENO) == 0 { posix_spawn_file_actions_addopen(&actions, 0, "/dev/null", O_RDONLY, 0) }
+    posix_spawn_file_actions_addchdir(&actions, workspace.root)  // the workspace, which /cd moves
 
     // -i loads ~/.zshrc so the user's aliases and functions work; +m turns off job control, which would move the
     // command to its own process group and break Ctrl-C handling here
@@ -220,6 +221,19 @@ while true {
     }
     var prompt = line.trimmingCharacters(in: .whitespaces)
     if prompt.isEmpty { continue }
+    // "!cd somewhere" would only change a short-lived shell's folder, so it means /cd
+    if shell && isStandaloneCd(prompt) { (shell, prompt) = (false, "/" + prompt) }
+    if prompt == "/cd" || prompt.hasPrefix("/cd ") {
+        let path = String(prompt.dropFirst(3)).trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "\\ ", with: " ")
+        switch workspace.change(to: path) {
+        case .failure(let error): print("\u{1B}[33m\(error.message)\u{1B}[0m")
+        case .success(let shown):
+            print("\u{1B}[2m  now in \(shown)\u{1B}[0m")
+            notesForModel.append("The working folder is now \((workspace.root as NSString).lastPathComponent); paths are relative to it.")
+            taskLog.note("moved to the folder \((workspace.root as NSString).lastPathComponent)")
+        }
+        continue
+    }
     if shell {
         lastShell = runDirect(prompt)
         continue

@@ -196,7 +196,6 @@ let runningSpinner = SpinnerSlot()
 final class TerminalUI {
     let autoApprove: Bool
     let workspace: Workspace
-    let cwd: String
     var rows = 24, cols = 80
     var menuRows = 0
     var outRow = 1, outCol = 1  // where the next output line goes inside the scroll region
@@ -217,9 +216,6 @@ final class TerminalUI {
     init(autoApprove: Bool, workspace: Workspace) {
         self.autoApprove = autoApprove
         self.workspace = workspace
-        var cwd = workspace.root
-        if cwd.hasPrefix(NSHomeDirectory()) { cwd = "~" + cwd.dropFirst(NSHomeDirectory().count) }
-        self.cwd = cwd
         tcgetattr(STDIN_FILENO, &cooked)
     }
 
@@ -248,7 +244,7 @@ final class TerminalUI {
         welcomeApple.settle()  // draw it once facing front…
         welcomeApple.place(at: top)  // …and keep it animatable
         writeOut(move(mid - 1, textCol) + "\(bold)fmagent\(reset)" + move(mid, textCol) + "\(dim)Apple Foundation Model · on-device\(reset)"
-            + move(mid + 1, textCol) + "\(dim)\(fitted(cwd, cols - textCol))\(reset)")
+            + move(mid + 1, textCol) + "\(dim)\(fitted(Workspace.tilde(workspace.root), cols - textCol))\(reset)")
         outRow = top + AppleLogo.height + 1
         writeOut(move(outRow, 1))  // the next read() takes the output position from the cursor
     }

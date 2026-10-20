@@ -51,6 +51,7 @@ In a terminal, fmagent runs full screen with the input box pinned to the bottom.
 | Paste | A multi-line paste shows as `[Pasted text #1 +17 lines]` and is sent in full when you press Enter; Backspace removes it whole. |
 | Tab | Completes the file or folder name under the cursor (opens the picker when there are several matches). |
 | ↑ / ↓ | History. ←/→, Home/End, Ctrl-A/E/K/U/W edit the line. |
+| `/cd <folder>` | Moves fmagent's working folder (`/cd` alone goes home; `!cd folder` does the same). The model's tools, `!commands`, the `@` picker and attachments all use it, and the model is told on your next message. |
 | `/explain-last` | Shares your last `!command`, its folder, exit code and the end of its output (3,000 characters) with the model and asks what happened. A plain `!command` is never shown to the model; only these two commands share it. |
 | `/fix-last` | Same, but asks the model to read the files involved and fix the cause with `replaceText` (diff and approval as usual). |
 | `/undo` | Reverts the latest file change fmagent made (an edit, overwrite or new file). It only does so if the file is still exactly as fmagent left it; otherwise it refuses and keeps your changes. Repeat to go further back. The model is told on your next message. |
@@ -87,7 +88,7 @@ Every command and file write is shown before it runs and needs your approval (on
 
 - The on-device model is small: it sometimes picks the wrong command, and code it writes may not compile. Run it yourself with `!` (e.g. `!rustc src/main.rs`) to check.
 - `!commands` run under `script(1)` so their output can be captured while they keep a real terminal. The recording goes to a private temporary file that is deleted as soon as the command ends; only the end of the latest command's output stays in memory, until the next `!command` or `/clear`. Full-screen programs (`vim`, `less`, `top`) aren't captured.
-- Each `!command` runs in its own shell, so `!cd somewhere` doesn't change fmagent's folder.
+- Each `!command` runs in its own shell, so shell state like `export` or `alias` defined in one doesn't carry to the next. `!cd` is the exception: it moves fmagent's working folder.
 
 ## Tests
 
