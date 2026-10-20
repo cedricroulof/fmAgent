@@ -3,7 +3,8 @@ import Foundation
 import FoundationModels
 import FMAgentCore
 
-let autoApprove = CommandLine.arguments.contains("--yes")
+// shortcut: unguarded, but only /permissions writes it, between requests; use a lock if it ever changes mid-request
+nonisolated(unsafe) var autoApprove = CommandLine.arguments.contains("--yes")
 // --timeout <seconds>: how long a command run by the model may take
 let commandTimeout = CommandLine.arguments.firstIndex(of: "--timeout").flatMap { index in
     CommandLine.arguments.dropFirst(index + 1).first.flatMap(TimeInterval.init)
@@ -278,6 +279,19 @@ while true {
         }
         savingStopped = true
         prompt = record.request(fix: prompt == "/fix-last")
+    }
+    if prompt == "/permissions" || prompt.hasPrefix("/permissions ") {
+        switch prompt.dropFirst("/permissions".count).trimmingCharacters(in: .whitespaces) {
+        case "auto": autoApprove = true
+        case "ask": autoApprove = false
+        case "": break
+        default: print("\u{1B}[33mUsage: /permissions [ask|auto]\u{1B}[0m"); continue
+        }
+        tui?.autoApprove = autoApprove
+        print(autoApprove
+            ? "\u{1B}[33m  auto: the model's commands and file changes run without asking (/permissions ask to turn it off)\u{1B}[0m"
+            : "\u{1B}[2m  ask: every command and file change the model wants is shown first and needs your y (/permissions auto to skip that)\u{1B}[0m")
+        continue
     }
     if prompt == "/undo" {
         let (message, undone) = journal.undoLatest()

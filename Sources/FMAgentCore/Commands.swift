@@ -12,6 +12,7 @@ public let slashCommands = [
     SlashCommand(name: "/clear", argument: nil, about: "clear the screen and start a new conversation"),
     SlashCommand(name: "/explain-last", argument: nil, about: "ask the model about your last !command"),
     SlashCommand(name: "/fix-last", argument: nil, about: "ask the model to fix what your last !command hit"),
+    SlashCommand(name: "/permissions", argument: nil, about: "show or change approvals (/permissions ask|auto)"),
     SlashCommand(name: "/resume", argument: "<number>", about: "continue a saved conversation"),
     SlashCommand(name: "/sessions", argument: nil, about: "list saved conversations (/sessions delete <number>)"),
     SlashCommand(name: "/undo", argument: nil, about: "revert the latest file change"),

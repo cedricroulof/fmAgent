@@ -58,6 +58,7 @@ In a terminal, fmagent runs full screen with the input box pinned to the bottom.
 | `/fix-last` | Same, but asks the model to read the files involved and fix the cause with `replaceText` (diff and approval as usual). |
 | `/sessions` | Lists saved conversations, newest first. `/sessions delete <number>` removes one. |
 | `/resume <number>` | Continues a saved conversation in a fresh session: same folder, task record and last exchanges. Nothing is rerun. Files fmagent changed that were edited elsewhere since are flagged, and the model is told to reread them. |
+| `/permissions` | Shows whether the model's commands and file changes ask first. `/permissions auto` stops asking (like `--yes`), `/permissions ask` asks again; the status line shows the mode. |
 | `/undo` | Reverts the latest file change fmagent made (an edit, overwrite or new file). It only does so if the file is still exactly as fmagent left it; otherwise it refuses and keeps your changes. Repeat to go further back. The model is told on your next message. |
 | `/clear` | Clears the screen (back to the welcome apple) and starts a new conversation (`/reset` does the same). Ctrl-L only clears the screen. |
 | Ctrl-C / Ctrl-D | Clear the line; on an empty line, quit. While the model works, Ctrl-C cancels the request (and stops any command it is running) and brings back the input box with the conversation kept; press it again to quit. At a [y/N] question it cancels too. |
