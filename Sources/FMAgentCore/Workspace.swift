@@ -45,6 +45,12 @@ public final class Workspace: @unchecked Sendable {
     }
 }
 
+/// Whether a `!` command is just `cd [path]`. Anything more (`cd x && make`, `cd x` then `pwd` on the next line)
+/// goes to zsh as written.
+public func isStandaloneCd(_ command: String) -> Bool {
+    (command == "cd" || command.hasPrefix("cd ")) && command.rangeOfCharacter(from: CharacterSet(charactersIn: ";&|<>`$()\n\r")) == nil
+}
+
 /// What every tool needs from the app: where paths resolve, how to ask the user, a hook run before output, and
 /// where applied edits are recorded.
 public struct ToolContext: Sendable {

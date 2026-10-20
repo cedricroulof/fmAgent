@@ -112,6 +112,8 @@ func makeTree(_ name: String, _ files: [String: String]) throws -> String {
     #expect(workspace.resolve("é.txt") == (dir as NSString).standardizingPath + "/sub dir/é.txt")
     #expect(listDirectory(workspace.resolve("."), shown: ".") == ". (1 entries):\né.txt")
     #expect(throws: InspectionError.self) { try workspace.change(to: "missing").get() }
+    #expect(isStandaloneCd("cd") && isStandaloneCd("cd sub\\ dir") && isStandaloneCd("cd ~/x"))
+    #expect(!isStandaloneCd("cd Sources\npwd") && !isStandaloneCd("cd x && make") && !isStandaloneCd("cd $HOME") && !isStandaloneCd("cdx"))
     #expect(throws: InspectionError.self) { try workspace.change(to: "../file.txt").get() }
     #expect(workspace.root.hasSuffix("/sub dir"))  // unchanged by the failed moves
     #expect(try workspace.change(to: "..").get() == Workspace.tilde((dir as NSString).standardizingPath))

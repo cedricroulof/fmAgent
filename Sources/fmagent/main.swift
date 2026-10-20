@@ -221,10 +221,8 @@ while true {
     }
     var prompt = line.trimmingCharacters(in: .whitespaces)
     if prompt.isEmpty { continue }
-    // "!cd somewhere" would only change a short-lived shell's folder, so it means /cd; "!cd x && make" goes to zsh
-    if shell && (prompt == "cd" || prompt.hasPrefix("cd ")) && prompt.rangeOfCharacter(from: CharacterSet(charactersIn: ";&|<>`$()")) == nil {
-        (shell, prompt) = (false, "/" + prompt)
-    }
+    // "!cd somewhere" would only change a short-lived shell's folder, so it means /cd
+    if shell && isStandaloneCd(prompt) { (shell, prompt) = (false, "/" + prompt) }
     if prompt == "/cd" || prompt.hasPrefix("/cd ") {
         let path = String(prompt.dropFirst(3)).trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "\\ ", with: " ")
         switch workspace.change(to: path) {
