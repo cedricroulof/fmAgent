@@ -60,7 +60,7 @@ func confirm(_ edit: EditProposal, _ context: ToolContext, question: String, don
     case .failure(let error): return failed(error.message)
     case .success:
         context.journal.record(edit)
-        context.log.fileChanged(edit.shown)
+        context.log.fileChanged(edit.shown, at: edit.path)
         return done
     }
 }

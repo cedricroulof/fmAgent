@@ -11,6 +11,13 @@ let commandTimeout = CommandLine.arguments.firstIndex(of: "--timeout").flatMap {
 let workspace = Workspace()
 let journal = EditJournal()
 let taskLog = TaskLog()
+// Conversations are saved after each answer (unless --no-save) so /resume can continue them later.
+let saveSessions = !CommandLine.arguments.contains("--no-save")
+let sessionStore = SessionStore()
+var sessionID = SessionStore.newID()
+var sessionTitle: String?
+var exchanges: [Exchange] = []
+var resumeRecap: String?  // set by /resume for the next new session
 var lastShell: ShellRecord?  // the latest !command, shared with the model only by /explain-last or /fix-last
 var notesForModel: [String] = []  // things that happened outside the model's view, told with the next prompt
 // Terminal.app's session restore prints "Restored session…" around every interactive zsh started for `!` commands
@@ -164,18 +171,38 @@ let stopAnimations: @Sendable () -> Void = {
     return notesForModel.isEmpty ? prompt : "(" + notesForModel.joined(separator: " ") + ")\n" + prompt
 }
 
-func newSession() -> LanguageModelSession {
+@MainActor func newSession() -> LanguageModelSession {
     let context = ToolContext(workspace: workspace, approve: approved, willRun: stopAnimations, journal: journal,
                               commandTimeout: commandTimeout, isCancelled: { canceller.isCancelled }, log: taskLog)
     let tools: [any Tool] = [RunCommand(context), WriteFile(context), ReplaceText(context), ReadFile(context), ListDirectory(context), SearchFiles(context)]
-    guard let record = taskLog.summary(workspace: workspace.root) else { return LanguageModelSession(tools: tools, instructions: instructions) }
-    return LanguageModelSession(tools: tools, instructions: instructions + """
+    var text = instructions
+    if let recap = resumeRecap { text += "\n\n" + recap }
+    resumeRecap = nil
+    if let record = taskLog.summary(workspace: workspace.root) {
+        text += "\n\nWhat happened so far in this task, recorded by fmagent (do not redo what is listed as done):\n" + record
+    }
+    return LanguageModelSession(tools: tools, instructions: text)
+}
 
+/// Saves the conversation after an answer: typed requests and answers, the task record, the folder, and hashes of
+/// the files fmagent changed (to notice later edits when resuming). Never shell output or attached file contents.
+@MainActor func saveSession() {
+    guard saveSessions, let title = sessionTitle else { return }
+    let task = taskLog.snapshot()
+    let hashes = Dictionary(task.changedFiles.compactMap { path in fileHash(path).map { (path, $0) } }, uniquingKeysWith: { $1 })
+    do {
+        try sessionStore.save(SavedSession(id: sessionID, title: title, workspace: workspace.root, task: task,
+                                           exchanges: exchanges, fileHashes: hashes))
+    } catch {
+        print("\u{1B}[33m  couldn't save this session: \(error.localizedDescription)\u{1B}[0m")
+    }
+}
 
-        This conversation was restarted because it got too long for your memory. What happened so far, \
-        recorded by fmagent (do not redo what is listed as done):
-        \(record)
-        """)
+func sessionLine(_ number: Int, _ saved: SavedSession) -> String {
+    let date = DateFormatter()
+    date.dateFormat = "MMM d HH:mm"
+    let folder = (saved.workspace as NSString).lastPathComponent
+    return "  \(number). \(date.string(from: saved.updated))  \(folder)  \(TaskLog.short(saved.title, 60))  (\(saved.exchanges.count) exchanges)"
 }
 
 enum Outcome { case answer(String), cancelled, failed(Error) }
@@ -220,6 +247,8 @@ while true {
         if line.hasPrefix("!") { shell = true; line.removeFirst() }
     }
     var prompt = line.trimmingCharacters(in: .whitespaces)
+    var typed = prompt  // what the task record keeps: never the shell output that /explain-last shares
+    var sharesShellOutput = false  // such an exchange is never saved to disk: output (and answers quoting it) may hold secrets
     if prompt.isEmpty { continue }
     // "!cd somewhere" would only change a short-lived shell's folder, so it means /cd
     if shell && isStandaloneCd(prompt) { (shell, prompt) = (false, "/" + prompt) }
@@ -242,6 +271,8 @@ while true {
         guard let record = lastShell else { print("\u{1B}[33mNo shell command yet: run one with ! first.\u{1B}[0m"); continue }
         let lines = record.output.map { $0.isEmpty ? 0 : $0.split(separator: "\n").count } ?? 0
         print("\u{1B}[2m  sharing `\(record.command)` (exit \(record.exitCode), \(record.output == nil ? "output not captured" : "\(lines) lines of output")) with the model\u{1B}[0m")
+        typed = "\(prompt) (exit \(record.exitCode))"  // not the command either: it can hold a token
+        sharesShellOutput = true
         prompt = record.request(fix: prompt == "/fix-last")
     }
     if prompt == "/undo" {
@@ -253,9 +284,48 @@ while true {
         }
         continue
     }
+    if prompt == "/sessions" || prompt.hasPrefix("/sessions delete") {
+        let saved = sessionStore.list()
+        if let number = Int(prompt.dropFirst("/sessions delete".count).trimmingCharacters(in: .whitespaces)), prompt.hasPrefix("/sessions delete") {
+            guard number >= 1, number <= saved.count else { print("\u{1B}[33mNo session \(number).\u{1B}[0m"); continue }
+            try? sessionStore.delete(saved[number - 1].id)
+            if saved[number - 1].id == sessionID { sessionTitle = nil }  // stop re-saving it
+            print("\u{1B}[2m  deleted \"\(TaskLog.short(saved[number - 1].title, 60))\"\u{1B}[0m")
+            continue
+        }
+        if saved.isEmpty { print("\u{1B}[2m  no saved sessions\(saveSessions ? "" : " (saving is off: --no-save)")\u{1B}[0m"); continue }
+        print(saved.prefix(20).enumerated().map { sessionLine($0.offset + 1, $0.element) }.joined(separator: "\n"))
+        print("\u{1B}[2m  /resume <number> to continue one, /sessions delete <number> to remove it\u{1B}[0m")
+        continue
+    }
+    if prompt.hasPrefix("/resume") {
+        let saved = sessionStore.list()
+        guard let number = Int(prompt.dropFirst("/resume".count).trimmingCharacters(in: .whitespaces)), number >= 1, number <= saved.count else {
+            print("\u{1B}[33mUsage: /resume <number>, from /sessions.\u{1B}[0m")
+            continue
+        }
+        let resumed = saved[number - 1]
+        if FileManager.default.fileExists(atPath: resumed.workspace) {
+            workspace.root = resumed.workspace
+        } else {
+            print("\u{1B}[33m  its folder \(Workspace.tilde(resumed.workspace)) is gone; staying in \(Workspace.tilde(workspace.root))\u{1B}[0m")
+        }
+        (sessionID, sessionTitle, exchanges, lastShell) = (resumed.id, resumed.title, resumed.exchanges, nil)
+        taskLog.restore(resumed.task)
+        resumeRecap = resumed.recap()
+        session = newSession()
+        print("\u{1B}[2m  resumed \"\(TaskLog.short(resumed.title, 60))\" (\(resumed.exchanges.count) exchanges) in \(Workspace.tilde(workspace.root)); nothing was rerun\u{1B}[0m")
+        if let last = resumed.exchanges.last {
+            print("\u{1B}[2m  last: ❯ \(TaskLog.short(last.request, 80))\n        ● \(TaskLog.short(last.answer, 80))\u{1B}[0m")
+        }
+        let changed = resumed.filesChangedSince()
+        if !changed.isEmpty { print("\u{1B}[33m  changed since: \(changed.map(Workspace.tilde).joined(separator: ", ")) (the model is told to reread them)\u{1B}[0m") }
+        continue
+    }
     if prompt == "/clear" || prompt == "/reset" {
         taskLog.clear()
         lastShell = nil
+        (sessionID, sessionTitle, exchanges, resumeRecap) = (SessionStore.newID(), nil, [], nil)
         session = newSession()
         if let tui { tui.clearScreen() } else { print("Session cleared.") }
         continue
@@ -264,7 +334,7 @@ while true {
     let (attached, attachmentNotes) = attachMentionedFiles(to: prompt, workspace: workspace)
     let message = withNotes(attached)
     for note in attachmentNotes { print("\u{1B}[2m  \(note)\u{1B}[0m") }
-    taskLog.request(prompt)
+    taskLog.request(typed)
     await compactIfNeeded()
     tui?.startWorking()
     let changesBefore = taskLog.changeCount
@@ -285,6 +355,13 @@ while true {
     case _ where recovery != nil: reply = "\u{1B}[33m" + recovery! + "\u{1B}[0m"
     case .answer(let text):
         taskLog.answer(text)
+        if sharesShellOutput {
+            if saveSessions { print("\u{1B}[2m  (this exchange includes shell output, so it isn't saved)\u{1B}[0m") }
+        } else {
+            if sessionTitle == nil { sessionTitle = typed }
+            exchanges.append(Exchange(request: typed, answer: text))
+            saveSession()
+        }
         reply = "● " + renderMarkdown(text).replacingOccurrences(of: "\n", with: "\n  ")
     case .cancelled: reply = "\u{1B}[33mCancelled.\u{1B}[0m"
     case .failed(let error) where isContextFull(error):

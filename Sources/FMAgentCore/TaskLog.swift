@@ -6,6 +6,7 @@ public final class TaskLog: @unchecked Sendable {
     private let lock = NSLock()
     private var goal: String?
     private var filesChanged: [String] = []
+    private var changedPaths: [String] = []  // absolute, to notice later edits made outside fmagent
     private var lastCommand: String?
     private var events: [String] = []
     private var lastRequest: String?
@@ -14,7 +15,8 @@ public final class TaskLog: @unchecked Sendable {
 
     public init() {}
 
-    static func short(_ text: String, _ limit: Int = 200) -> String {
+    /// One line, cut to `limit` characters.
+    public static func short(_ text: String, _ limit: Int = 200) -> String {
         let flat = text.replacingOccurrences(of: "\n", with: " ")
         return flat.count <= limit ? flat : flat.prefix(limit) + "…"
     }
@@ -41,10 +43,14 @@ public final class TaskLog: @unchecked Sendable {
         }
     }
 
-    public func fileChanged(_ path: String) {
+    public func fileChanged(_ path: String, at absolute: String? = nil) {
         lock.withLock {
             filesChanged.removeAll { $0 == path }
             filesChanged.append(path)
+            if let absolute {
+                changedPaths.removeAll { $0 == absolute }
+                changedPaths.append(absolute)
+            }
             event("changed \(path)")
             changes += 1
         }
@@ -57,7 +63,31 @@ public final class TaskLog: @unchecked Sendable {
     public var changeCount: Int { lock.withLock { changes } }
 
     public func clear() {
-        lock.withLock { (goal, filesChanged, lastCommand, events, lastRequest, lastAnswer) = (nil, [], nil, [], nil, nil) }
+        lock.withLock { (goal, filesChanged, changedPaths, lastCommand, events, lastRequest, lastAnswer) = (nil, [], [], nil, [], nil, nil) }
+    }
+
+    /// Everything recorded, to save with a session and restore later.
+    public struct Snapshot: Codable, Equatable, Sendable {
+        var goal: String?
+        var filesChanged: [String]
+        var changedPaths: [String]
+        var lastCommand: String?
+        var events: [String]
+        var lastRequest: String?
+        var lastAnswer: String?
+        public var changedFiles: [String] { changedPaths }
+    }
+
+    public func snapshot() -> Snapshot {
+        lock.withLock { Snapshot(goal: goal, filesChanged: filesChanged, changedPaths: changedPaths, lastCommand: lastCommand,
+                                 events: events, lastRequest: lastRequest, lastAnswer: lastAnswer) }
+    }
+
+    public func restore(_ s: Snapshot) {
+        lock.withLock {
+            (goal, filesChanged, changedPaths, lastCommand) = (s.goal, s.filesChanged, s.changedPaths, s.lastCommand)
+            (events, lastRequest, lastAnswer) = (s.events, s.lastRequest, s.lastAnswer)
+        }
     }
 
     /// A compact record for a fresh session's instructions; nil when nothing happened yet.

@@ -40,6 +40,7 @@ cp .build/release/fmagent /usr/local/bin/   # optional, may need sudo
 fmagent          # asks [y/N] before every command or file write
 fmagent --yes    # runs everything without asking — use with care
 fmagent --timeout 300   # let commands run by the model take up to 300 s (default 60)
+fmagent --no-save       # don't save this conversation for /resume
 ```
 
 In a terminal, fmagent runs full screen with the input box pinned to the bottom. The welcome screen shows a 3D dotted apple that spins until your first prompt and while the model answers it; then the conversation scrolls it away (scrollback keeps everything).
@@ -54,6 +55,8 @@ In a terminal, fmagent runs full screen with the input box pinned to the bottom.
 | `/cd <folder>` | Moves fmagent's working folder (`/cd` alone goes home; `!cd folder` does the same). The model's tools, `!commands`, the `@` picker and attachments all use it, and the model is told on your next message. |
 | `/explain-last` | Shares your last `!command`, its folder, exit code and the end of its output (3,000 characters) with the model and asks what happened. A plain `!command` is never shown to the model; only these two commands share it. |
 | `/fix-last` | Same, but asks the model to read the files involved and fix the cause with `replaceText` (diff and approval as usual). |
+| `/sessions` | Lists saved conversations, newest first. `/sessions delete <number>` removes one. |
+| `/resume <number>` | Continues a saved conversation in a fresh session: same folder, task record and last exchanges. Nothing is rerun. Files fmagent changed that were edited elsewhere since are flagged, and the model is told to reread them. |
 | `/undo` | Reverts the latest file change fmagent made (an edit, overwrite or new file). It only does so if the file is still exactly as fmagent left it; otherwise it refuses and keeps your changes. Repeat to go further back. The model is told on your next message. |
 | `/clear` | Clears the screen (back to the welcome apple) and starts a new conversation (`/reset` does the same). Ctrl-L only clears the screen. |
 | Ctrl-C / Ctrl-D | Clear the line; on an empty line, quit. While the model works, Ctrl-C cancels the request (and stops any command it is running) and brings back the input box with the conversation kept; press it again to quit. At a [y/N] question it cancels too. |
@@ -78,7 +81,16 @@ The on-device model's context holds 8,192 tokens on macOS 27 (the tools' descrip
 - **Before it fills up:** when the conversation passes 70% of the context, fmagent quietly continues in a fresh session that starts from this record. This needs macOS 26.4 or later.
 - **If it overflows anyway:** fmagent starts fresh from the record. If nothing had been run or written yet, it asks again automatically. If something had already happened, it shows the record and lets you decide, so nothing is ever done twice.
 
-`/clear` forgets the record.
+`/clear` forgets the record and starts a new saved conversation (the previous one stays in `/sessions`).
+
+### Saved conversations
+
+After each answer, the conversation is saved to `~/.fmagent/sessions/<id>.json` (folder readable only by you, files `0600`, versioned format). It holds:
+- the messages you typed and the model's answers (the last 20, each shortened);
+- the task record and the working folder;
+- a checksum of each file fmagent changed, to notice edits made elsewhere.
+
+It never holds `!command` output or attached file contents. An exchange that shared shell output (`/explain-last`, `/fix-last`) isn't saved at all, because the output, or an answer quoting it, may contain secrets. To delete a conversation use `/sessions delete`. To save nothing at all, start with `--no-save`.
 
 ## Safety
 
