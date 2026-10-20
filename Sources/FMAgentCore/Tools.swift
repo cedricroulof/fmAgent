@@ -76,7 +76,9 @@ func confirm(_ edit: EditProposal, _ context: ToolContext, question: String, don
     guard context.approve(question) else { return "The user declined this change; nothing was written. Do not retry it; answer without it." }
     switch apply(edit) {
     case .failure(let error): return failed(error.message)
-    case .success: return done
+    case .success:
+        context.journal.record(edit)
+        return done
     }
 }
 

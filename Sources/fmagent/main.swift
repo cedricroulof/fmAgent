@@ -5,6 +5,8 @@ import FMAgentCore
 
 let autoApprove = CommandLine.arguments.contains("--yes")
 let workspace = Workspace()
+let journal = EditJournal()
+var notesForModel: [String] = []  // things that happened outside the model's view, told with the next prompt
 // Terminal.app's session restore prints "Restored session…" around every interactive zsh started for `!` commands
 setenv("SHELL_SESSIONS_DISABLE", "1", 1)
 
@@ -72,8 +74,14 @@ let stopAnimations: @Sendable () -> Void = {
     welcomeApple.settle()
 }
 
+/// Prefixes the prompt with what the model should know happened since its last answer (e.g. an undone edit).
+@MainActor func withNotes(_ prompt: String) -> String {
+    defer { notesForModel.removeAll() }
+    return notesForModel.isEmpty ? prompt : "(" + notesForModel.joined(separator: " ") + ")\n" + prompt
+}
+
 func newSession() -> LanguageModelSession {
-    let context = ToolContext(workspace: workspace, approve: approved, willRun: stopAnimations)
+    let context = ToolContext(workspace: workspace, approve: approved, willRun: stopAnimations, journal: journal)
     let tools: [any Tool] = [RunCommand(context), WriteFile(context), ReplaceText(context), ReadFile(context), ListDirectory(context), SearchFiles(context)]
     return LanguageModelSession(tools: tools, instructions: instructions)
 }
@@ -102,6 +110,12 @@ while true {
     let prompt = line.trimmingCharacters(in: .whitespaces)
     if prompt.isEmpty { continue }
     if shell { runDirect(prompt); continue }
+    if prompt == "/undo" {
+        let (message, undone) = journal.undoLatest()
+        print((undone ? "" : "\u{1B}[33m") + message + "\u{1B}[0m")
+        if undone { notesForModel.append("The user ran /undo: " + message) }
+        continue
+    }
     if prompt == "/clear" || prompt == "/reset" {
         session = newSession()
         if let tui { tui.clearScreen() } else { print("Session cleared.") }
@@ -111,7 +125,7 @@ while true {
     tui?.startWorking()
     var reply: String
     do {
-        reply = "● " + renderMarkdown(try await session.respond(to: stripFileMentions(prompt)).content).replacingOccurrences(of: "\n", with: "\n  ")
+        reply = "● " + renderMarkdown(try await session.respond(to: withNotes(stripFileMentions(prompt))).content).replacingOccurrences(of: "\n", with: "\n  ")
     } catch where isContextFull(error) {
         session = newSession()
         reply = "Context window full; session was reset. Please repeat your request."

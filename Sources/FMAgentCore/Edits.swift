@@ -113,3 +113,40 @@ public func coloredDiff(_ diff: String, maxLines: Int = 80) -> String {
     if all.count > maxLines { shown.append("\u{1B}[2m… \(all.count - maxLines) more diff lines\u{1B}[0m") }
     return shown.joined(separator: "\n")
 }
+
+/// Edits applied in this session, newest last, so `/undo` can revert the latest one.
+public final class EditJournal: @unchecked Sendable {
+    struct Entry { let path: String, shown: String, before: String?, after: String }
+    private let lock = NSLock()
+    private var entries: [Entry] = []
+
+    public init() {}
+
+    public func record(_ edit: EditProposal) {
+        lock.withLock { entries.append(Entry(path: edit.path, shown: edit.shown, before: edit.original, after: edit.updated)) }
+    }
+
+    /// Reverts the latest edit if the file is still exactly as fmagent left it; otherwise changes nothing.
+    /// Returns what happened, for the user, and whether something was undone.
+    public func undoLatest() -> (message: String, undone: Bool) {
+        lock.withLock {
+            guard let entry = entries.last else { return ("Nothing to undo.", false) }
+            guard (try? String(contentsOfFile: entry.path, encoding: .utf8)) == entry.after else {
+                return ("\(entry.shown) changed after fmagent edited it; not undone, so your changes are kept.", false)
+            }
+            do {
+                if let before = entry.before {
+                    let permissions = try? FileManager.default.attributesOfItem(atPath: entry.path)[.posixPermissions]
+                    try before.write(toFile: entry.path, atomically: true, encoding: .utf8)
+                    if let permissions { try FileManager.default.setAttributes([.posixPermissions: permissions], ofItemAtPath: entry.path) }
+                } else {
+                    try FileManager.default.removeItem(atPath: entry.path)
+                }
+            } catch {
+                return ("Couldn't undo the edit to \(entry.shown): \(error.localizedDescription)", false)
+            }
+            entries.removeLast()
+            return (entry.before == nil ? "Removed \(entry.shown), which fmagent had created." : "Restored \(entry.shown) to before fmagent's edit.", true)
+        }
+    }
+}
