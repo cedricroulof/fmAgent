@@ -10,6 +10,7 @@ let commandTimeout = CommandLine.arguments.firstIndex(of: "--timeout").flatMap {
 } ?? 60
 let workspace = Workspace()
 let journal = EditJournal()
+let taskLog = TaskLog()
 var notesForModel: [String] = []  // things that happened outside the model's view, told with the next prompt
 // Terminal.app's session restore prints "Restored session…" around every interactive zsh started for `!` commands
 setenv("SHELL_SESSIONS_DISABLE", "1", 1)
@@ -111,14 +112,22 @@ let instructions = """
     at a time. To look at files use readFile, listDirectory and searchFiles, not cat, ls or grep. To change part \
     of a file, read it, then use replaceText with the exact current text; use writeFile only for new files or full \
     rewrites. If the user declines a \
-    command, do not retry it. Only claim something worked if the tool result confirms it. You work in the folder \(workspace.root); give paths relative to it, like calc.py or src/main.swift
+    command, do not retry it. Only claim something worked if the tool result confirms it. You work in the user's current folder, named \((workspace.root as NSString).lastPathComponent); give paths relative to it, like calc.py or src/main.swift (never an absolute path)
     """
 
 // macOS 27 renamed the error; check both so the tool also runs on macOS 26.
 func isContextFull(_ error: Error) -> Bool {
     if #available(macOS 27, *), case LanguageModelError.contextSizeExceeded = error { return true }
     if case LanguageModelSession.GenerationError.exceededContextWindowSize = error { return true }
-    return false
+    return mentionsTooManyTokens(error)
+}
+
+// shortcut: on macOS 27.0.1 an overflow during tool calls comes back as a private GenerativeError
+// (.prompt(.tooManyTokens)) instead of LanguageModelError.contextSizeExceeded; matched by reflection until the
+// SDK reports it with the public error.
+func mentionsTooManyTokens(_ value: Any, depth: Int = 0) -> Bool {
+    guard depth < 6 else { return false }
+    return Mirror(reflecting: value).children.contains { $0.label == "tooManyTokens" || mentionsTooManyTokens($0.value, depth: depth + 1) }
 }
 
 // Before a tool prints: stop background drawing, and settle the welcome apple since tool output could scroll it.
@@ -135,9 +144,36 @@ let stopAnimations: @Sendable () -> Void = {
 
 func newSession() -> LanguageModelSession {
     let context = ToolContext(workspace: workspace, approve: approved, willRun: stopAnimations, journal: journal,
-                              commandTimeout: commandTimeout, isCancelled: { canceller.isCancelled })
+                              commandTimeout: commandTimeout, isCancelled: { canceller.isCancelled }, log: taskLog)
     let tools: [any Tool] = [RunCommand(context), WriteFile(context), ReplaceText(context), ReadFile(context), ListDirectory(context), SearchFiles(context)]
-    return LanguageModelSession(tools: tools, instructions: instructions)
+    guard let record = taskLog.summary(workspace: workspace.root) else { return LanguageModelSession(tools: tools, instructions: instructions) }
+    return LanguageModelSession(tools: tools, instructions: instructions + """
+
+
+        This conversation was restarted because it got too long for your memory. What happened so far, \
+        recorded by fmagent (do not redo what is listed as done):
+        \(record)
+        """)
+}
+
+enum Outcome { case answer(String), cancelled, failed(Error) }
+
+/// Sends one message to the model; Ctrl-C cancels it (see RequestCanceller).
+@MainActor func send(_ message: String) async -> Outcome {
+    let request = Task { [session] in try await session.respond(to: message).content }
+    canceller.begin(request)
+    defer { canceller.end() }
+    do { return .answer(try await request.value) } catch { return canceller.isCancelled ? .cancelled : .failed(error) }
+}
+
+/// Restarts the session from the task record before the conversation fills the model's context.
+@MainActor func compactIfNeeded() async {
+    guard #available(macOS 26.4, *) else { return }
+    let model = SystemLanguageModel.default
+    guard let used = try? await model.tokenCount(for: session.transcript), used > model.contextSize * 7 / 10,
+          taskLog.summary(workspace: workspace.root) != nil else { return }
+    session = newSession()
+    print("\u{1B}[2m  the conversation was getting long: continuing in a fresh session with a record of the task\u{1B}[0m")
 }
 
 guard case .available = SystemLanguageModel.default.availability else {
@@ -167,10 +203,14 @@ while true {
     if prompt == "/undo" {
         let (message, undone) = journal.undoLatest()
         print((undone ? "" : "\u{1B}[33m") + message + "\u{1B}[0m")
-        if undone { notesForModel.append("The user ran /undo: " + message) }
+        if undone {
+            notesForModel.append("The user ran /undo: " + message)
+            taskLog.note("the user ran /undo: " + message)
+        }
         continue
     }
     if prompt == "/clear" || prompt == "/reset" {
+        taskLog.clear()
         session = newSession()
         if let tui { tui.clearScreen() } else { print("Session cleared.") }
         continue
@@ -179,21 +219,33 @@ while true {
     let (attached, attachmentNotes) = attachMentionedFiles(to: prompt, workspace: workspace)
     let message = withNotes(attached)
     for note in attachmentNotes { print("\u{1B}[2m  \(note)\u{1B}[0m") }
+    taskLog.request(prompt)
+    await compactIfNeeded()
     tui?.startWorking()
-    let request = Task { [session] in try await session.respond(to: message).content }
-    canceller.begin(request)
-    var reply: String
-    do {
-        reply = "● " + renderMarkdown(try await request.value).replacingOccurrences(of: "\n", with: "\n  ")
-    } catch where canceller.isCancelled {
-        reply = "\u{1B}[33mCancelled.\u{1B}[0m"
-    } catch where isContextFull(error) {
-        session = newSession()
-        reply = "Context window full; session was reset. Please repeat your request."
-    } catch {
-        reply = "Error: \(error)"
+    let changesBefore = taskLog.changeCount
+    var outcome = await send(message)
+    var recovery: String?
+    if case .failed(let error) = outcome, isContextFull(error) {
+        session = newSession()  // starts from the task record
+        if taskLog.changeCount == changesBefore {  // nothing happened yet, so asking again can't repeat anything
+            print("\u{1B}[2m  the conversation was too long for the model: continuing in a fresh session with a record of the task\u{1B}[0m")
+            outcome = await send(message)
+        } else {
+            recovery = "The model's memory filled up after it had already acted, so nothing is repeated automatically. "
+                + "It continues fresh from this record; tell it what to do next:\n" + (taskLog.summary(workspace: workspace.root) ?? "")
+        }
     }
-    canceller.end()
+    var reply: String
+    switch outcome {
+    case _ where recovery != nil: reply = "\u{1B}[33m" + recovery! + "\u{1B}[0m"
+    case .answer(let text):
+        taskLog.answer(text)
+        reply = "● " + renderMarkdown(text).replacingOccurrences(of: "\n", with: "\n  ")
+    case .cancelled: reply = "\u{1B}[33mCancelled.\u{1B}[0m"
+    case .failed(let error) where isContextFull(error):
+        reply = "\u{1B}[33mThis request is too long for the model's memory even in a fresh session; try a shorter one.\u{1B}[0m"
+    case .failed(let error): reply = "Error: \(error)"
+    }
     tui?.stopWorking()
     print("\n" + reply)
 }
