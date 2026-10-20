@@ -28,11 +28,19 @@ Check the model is ready with `fm available`.
 ## Install
 
 ```sh
+npm install -g fmagent
+```
+
+The package holds the prebuilt binary for Apple Silicon (Node is only the installer). To build it yourself instead:
+
+```sh
 git clone https://github.com/cedricroulof/fmAgent.git
 cd fmAgent
 swift build -c release
 cp .build/release/fmagent /usr/local/bin/   # optional, may need sudo
 ```
+
+To publish a new npm version: `scripts/release-npm.sh <version>` builds the binary into `npm/` and checks the package, then `cd npm && npm publish`.
 
 ## Usage
 

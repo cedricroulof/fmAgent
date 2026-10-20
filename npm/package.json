@@ -1,0 +1,32 @@
+{
+  "name": "fmagent",
+  "version": "0.1.0",
+  "description": "Terminal assistant for Apple's on-device Foundation Model that can run commands and edit files, with your approval",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cedricroulof/fmAgent.git"
+  },
+  "homepage": "https://github.com/cedricroulof/fmAgent#readme",
+  "bugs": "https://github.com/cedricroulof/fmAgent/issues",
+  "keywords": [
+    "apple",
+    "foundation-models",
+    "on-device",
+    "terminal",
+    "cli",
+    "macos"
+  ],
+  "bin": {
+    "fmagent": "bin/fmagent"
+  },
+  "files": [
+    "bin/fmagent"
+  ],
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ]
+}
