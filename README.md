@@ -39,6 +39,7 @@ cp .build/release/fmagent /usr/local/bin/   # optional, may need sudo
 ```sh
 fmagent          # asks [y/N] before every command or file write
 fmagent --yes    # runs everything without asking — use with care
+fmagent --timeout 300   # let commands run by the model take up to 300 s (default 60)
 ```
 
 In a terminal, fmagent runs full screen with the input box pinned to the bottom. The welcome screen shows a 3D dotted apple that spins until your first prompt and while the model answers it; then the conversation scrolls it away (scrollback keeps everything).
@@ -60,7 +61,7 @@ When input is piped (`echo '!ls' | fmagent`), it falls back to plain line-by-lin
 
 | Tool | What it does |
 |------|--------------|
-| `runCommand` | Runs a command with `zsh -c`, returns the exit code and combined stdout/stderr (last 3000 characters). Stdin is `/dev/null`, so interactive commands never hang. |
+| `runCommand` | Runs a command with `zsh -c` in fmagent's folder, with stdin from `/dev/null`, so it never waits for the keyboard. Output is read as it arrives: the model sees the first 1 KB and the last 2 KB, with a note of how much was skipped, so huge output can't fill memory. After the timeout (60 s, `--timeout`), the command and everything it started are stopped. The result says whether it exited (with its code), was killed by a signal, timed out, or was cancelled. |
 | `writeFile` | Creates a text file (creating missing folders), or rewrites a whole file. Overwriting shows a diff against the current content. Refuses to overwrite non-text files. |
 | `replaceText` | Changes part of a file: `oldText` must match exactly once (line numbers copied from `readFile` are ignored). Shows a unified diff and asks before writing. |
 | `readFile` | Reads numbered lines of a text file (120 lines or 6 KB per call, very long lines cut) and says where to continue. Explains missing, binary and non-UTF-8 files instead of showing them. |

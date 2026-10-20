@@ -10,37 +10,6 @@ func tempPath(_ name: String) -> String {
     FileManager.default.temporaryDirectory.appendingPathComponent("fmagent-\(UUID().uuidString)-\(name)").path
 }
 
-@Test func runShellCapturesStdoutStderrAndStatus() {
-    let (out, status) = runShell("echo out; echo err >&2; exit 3")
-    #expect(out == "out\nerr\n")
-    #expect(status == 3)
-}
-
-@Test func runShellDoesNotWaitForInput() {
-    // stdin is /dev/null, so a command reading input ends immediately instead of hanging
-    let (out, status) = runShell("cat")
-    #expect(out == "")
-    #expect(status == 0)
-}
-
-@Test func runShellHandlesLargeOutput() {
-    // more than a pipe buffer (64 KB): would deadlock if the process were waited on before reading
-    let (out, status) = runShell("head -c 200000 /dev/zero | tr '\\0' a")
-    #expect(out.count == 200_000)
-    #expect(status == 0)
-}
-
-@Test func truncatedKeepsShortOutput() {
-    #expect(truncated("hello") == "hello")
-    let exact = String(repeating: "x", count: maxOutput)
-    #expect(truncated(exact) == exact)
-}
-
-@Test func truncatedKeepsTailOfLongOutput() {
-    let long = String(repeating: "a", count: 10) + String(repeating: "b", count: maxOutput)
-    #expect(truncated(long) == "[...truncated 10 chars...]\n" + String(repeating: "b", count: maxOutput))
-}
-
 @Test func runCommandReturnsExitCodeAndOutput() async throws {
     let result = try await RunCommand(ToolContext(approve: yes)).call(arguments: GeneratedContent(properties: ["command": "echo hi"]))
     #expect(result == "exit code: 0\nhi\n")

@@ -1,27 +1,6 @@
 import Foundation
 import FoundationModels
 
-public let maxOutput = 3000  // the on-device model's context is small, so keep tool output small
-
-public func runShell(_ command: String, in directory: String? = nil) -> (output: String, status: Int32) {
-    let p = Process()
-    p.executableURL = URL(fileURLWithPath: "/bin/zsh")
-    p.arguments = ["-c", command]
-    if let directory { p.currentDirectoryURL = URL(fileURLWithPath: directory) }
-    p.standardInput = FileHandle.nullDevice  // never hang waiting on the terminal
-    let pipe = Pipe()
-    p.standardOutput = pipe
-    p.standardError = pipe
-    do { try p.run() } catch { return ("failed to launch: \(error)", -1) }
-    let data = pipe.fileHandleForReading.readDataToEndOfFile()  // read before wait to avoid pipe deadlock
-    p.waitUntilExit()
-    return (String(decoding: data, as: UTF8.self), p.terminationStatus)
-}
-
-public func truncated(_ s: String) -> String {
-    s.count <= maxOutput ? s : "[...truncated \(s.count - maxOutput) chars...]\n" + s.suffix(maxOutput)
-}
-
 // Schemas are built by hand: the @Generable macro needs full Xcode, not just the Command Line Tools.
 func schema(_ name: String, _ properties: [DynamicGenerationSchema.Property]) -> GenerationSchema {
     try! GenerationSchema(root: DynamicGenerationSchema(name: name, properties: properties), dependencies: [])
@@ -125,9 +104,9 @@ public struct RunCommand: Tool {
         context.willRun()
         print("\n\u{1B}[33m$ \(cmd)\u{1B}[0m")
         guard context.approve("Run this command?") else { return "The user declined to run this command. Do not run it again; answer without it." }
-        let (out, status) = runShell(cmd, in: context.workspace.root)
-        print("\u{1B}[2m\(truncated(out))\u{1B}[0m(exit \(status))")
-        return "exit code: \(status)\n\(truncated(out))"
+        let result = runCommand(cmd, in: context.workspace.root, timeout: context.commandTimeout, isCancelled: context.isCancelled)
+        print("\u{1B}[2m\(result.output)\u{1B}[0m(\(result.summary))")
+        return result.summary + "\n" + result.output
     }
 }
 
