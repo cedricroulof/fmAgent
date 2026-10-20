@@ -2,3 +2,6 @@
 .swiftpm/
 *.xcodeproj
 .DS_Store
+npm/bin/
+npm/LICENSE
+npm/*.tgz
