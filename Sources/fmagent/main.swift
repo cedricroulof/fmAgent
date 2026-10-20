@@ -4,6 +4,10 @@ import FoundationModels
 import FMAgentCore
 
 let autoApprove = CommandLine.arguments.contains("--yes")
+// --timeout <seconds>: how long a command run by the model may take
+let commandTimeout = CommandLine.arguments.firstIndex(of: "--timeout").flatMap { index in
+    CommandLine.arguments.dropFirst(index + 1).first.flatMap(TimeInterval.init)
+} ?? 60
 let workspace = Workspace()
 let journal = EditJournal()
 var notesForModel: [String] = []  // things that happened outside the model's view, told with the next prompt
@@ -81,7 +85,7 @@ let stopAnimations: @Sendable () -> Void = {
 }
 
 func newSession() -> LanguageModelSession {
-    let context = ToolContext(workspace: workspace, approve: approved, willRun: stopAnimations, journal: journal)
+    let context = ToolContext(workspace: workspace, approve: approved, willRun: stopAnimations, journal: journal, commandTimeout: commandTimeout)
     let tools: [any Tool] = [RunCommand(context), WriteFile(context), ReplaceText(context), ReadFile(context), ListDirectory(context), SearchFiles(context)]
     return LanguageModelSession(tools: tools, instructions: instructions)
 }

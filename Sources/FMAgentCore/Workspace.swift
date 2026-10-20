@@ -35,11 +35,16 @@ public struct ToolContext: Sendable {
     public var approve: @Sendable (String) -> Bool
     public var willRun: @Sendable () -> Void  // called before the tool prints anything
     public var journal: EditJournal  // applied edits, for /undo
+    public var commandTimeout: TimeInterval  // seconds before a model command is stopped
+    public var isCancelled: @Sendable () -> Bool  // the user asked to stop (Ctrl-C)
 
     public init(workspace: Workspace = Workspace(), approve: @escaping @Sendable (String) -> Bool,
-                willRun: @escaping @Sendable () -> Void = {}, journal: EditJournal = EditJournal()) {
+                willRun: @escaping @Sendable () -> Void = {}, journal: EditJournal = EditJournal(),
+                commandTimeout: TimeInterval = 60, isCancelled: @escaping @Sendable () -> Bool = { false }) {
         self.workspace = workspace
         self.journal = journal
+        self.commandTimeout = commandTimeout
+        self.isCancelled = isCancelled
         self.approve = approve
         self.willRun = willRun
     }
