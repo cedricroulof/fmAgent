@@ -342,7 +342,7 @@ final class TerminalUI {
                 }
             case .tab:
                 if !items.isEmpty { accept() } else {
-                    let matches = pathCompletions(for: currentToken().text, in: workspace.root)
+                    let matches = completions(for: currentToken().text)
                     if matches.count == 1 { items = matches; sel = 0; accept() } else if matches.count > 1 { forcedMenu = true }
                 }
             case .enter:
@@ -373,14 +373,21 @@ final class TerminalUI {
         cur = buf.count
     }
 
+    /// The word before the cursor; a `\ ` (escaped space, as in picked paths) doesn't end it.
     func currentToken() -> (start: Int, text: String) {
-        let start = buf[..<cur].lastIndex(where: \.isWhitespace).map { $0 + 1 } ?? 0
+        var start = cur
+        while start > 0 && !(buf[start - 1].isWhitespace && (start < 2 || buf[start - 2] != "\\")) { start -= 1 }
         return (start, String(buf[start..<cur]))
+    }
+
+    /// Completions for the word before the cursor, without its `@` and with `\ ` read as a space.
+    func completions(for token: String) -> [String] {
+        pathCompletions(for: token.replacingOccurrences(of: "\\ ", with: " "), in: workspace.root)
     }
 
     func accept() {
         let (start, token) = currentToken()
-        let pick = (token.hasPrefix("@") ? "@" : "") + items[sel]
+        let pick = (token.hasPrefix("@") ? "@" : "") + items[sel].replacingOccurrences(of: " ", with: "\\ ")
         buf.replaceSubrange(start..<cur, with: Array(pick))
         cur = start + pick.count
         if !pick.hasSuffix("/") {  // a file ends the word; a directory keeps the menu open on its content
@@ -436,8 +443,8 @@ final class TerminalUI {
     func render() {
         let token = currentToken().text
         if menuDismissed { items = [] }
-        else if token.hasPrefix("@") { items = pathCompletions(for: String(token.dropFirst()), in: workspace.root) }
-        else if forcedMenu { items = pathCompletions(for: token, in: workspace.root) }
+        else if token.hasPrefix("@") { items = completions(for: String(token.dropFirst())) }
+        else if forcedMenu { items = completions(for: token) }
         else { items = [] }
         if sel >= items.count { sel = 0 }
         setMenuRows(min(items.count, 5))

@@ -46,7 +46,7 @@ In a terminal, fmagent runs full screen with the input box pinned to the bottom.
 | Input | What it does |
 |-------|--------------|
 | `!command` | Typing `!` first switches the box to shell mode; the command runs directly in zsh on your terminal with your `~/.zshrc` loaded (aliases and functions work, and so do interactive programs like `vim`) and is never sent to the model. Ctrl-C stops it without leaving fmagent. |
-| `@path` | Opens a file picker above the box. ↑/↓ to move, Tab or Enter to insert, Esc to close. Picking a folder lists its content. The model receives the plain path, without the `@`. |
+| `@path` | Opens a file picker above the box. ↑/↓ to move, Tab or Enter to insert, Esc to close. Picking a folder lists its content; spaces in names are inserted as `\ `. When you send the message, each `@file` attaches its first 80 lines (at most 3 KB per file, 6 KB per message), marked as data rather than instructions. A dim note shows what was attached, cut short or left out. Folders, missing and binary files are never attached. To mention a path without attaching it, write it without `@`. |
 | Paste | A multi-line paste shows as `[Pasted text #1 +17 lines]` and is sent in full when you press Enter; Backspace removes it whole. |
 | Tab | Completes the file or folder name under the cursor (opens the picker when there are several matches). |
 | ↑ / ↓ | History. ←/→, Home/End, Ctrl-A/E/K/U/W edit the line. |

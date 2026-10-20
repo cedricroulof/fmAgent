@@ -122,10 +122,12 @@ while true {
         continue
     }
 
+    let (message, attachmentNotes) = attachMentionedFiles(to: prompt, workspace: workspace)
+    for note in attachmentNotes { print("\u{1B}[2m  \(note)\u{1B}[0m") }
     tui?.startWorking()
     var reply: String
     do {
-        reply = "● " + renderMarkdown(try await session.respond(to: withNotes(stripFileMentions(prompt))).content).replacingOccurrences(of: "\n", with: "\n  ")
+        reply = "● " + renderMarkdown(try await session.respond(to: withNotes(message)).content).replacingOccurrences(of: "\n", with: "\n  ")
     } catch where isContextFull(error) {
         session = newSession()
         reply = "Context window full; session was reset. Please repeat your request."
