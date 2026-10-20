@@ -341,7 +341,7 @@ while true {
     taskLog.request(typed)
     await compactIfNeeded()
     tui?.startWorking()
-    let changesBefore = taskLog.changeCount
+    let (changesBefore, declinesBefore) = (taskLog.changeCount, taskLog.declineCount)
     var outcome = await send(message)
     var recovery: String?
     if case .failed(let error) = outcome, isContextFull(error) {
@@ -353,6 +353,13 @@ while true {
             recovery = "The model's memory filled up after it had already acted, so nothing is repeated automatically. "
                 + "It continues fresh from this record; tell it what to do next:\n" + (taskLog.summary(workspace: workspace.root) ?? "")
         }
+    }
+    // the small model often reads the file and then shows the fix instead of applying it: ask once more
+    if case .answer = outcome, recovery == nil, taskLog.changeCount == changesBefore,
+       taskLog.declineCount == declinesBefore, asksForChange(typed) {  // never after the user said no
+        let next = await send("You haven't changed any file yet. Make the change I asked for now with replaceText or writeFile "
+            + "(read the file first if you need its exact text). Don't show the code or ask me to confirm; I approve each change.")
+        if case .answer = next { outcome = next }
     }
     var reply: String
     switch outcome {

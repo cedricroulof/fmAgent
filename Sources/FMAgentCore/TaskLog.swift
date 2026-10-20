@@ -12,6 +12,7 @@ public final class TaskLog: @unchecked Sendable {
     private var lastRequest: String?
     private var lastAnswer: String?
     private var changes = 0  // commands run and files written, to know if a request had side effects
+    private var declines = 0
 
     public init() {}
 
@@ -56,11 +57,12 @@ public final class TaskLog: @unchecked Sendable {
         }
     }
 
-    public func declined(_ what: String) { lock.withLock { event("the user declined: \(what)") } }
+    public func declined(_ what: String) { lock.withLock { declines += 1; event("the user declined: \(what)") } }
     public func note(_ what: String) { lock.withLock { event(what) } }
 
     /// Grows with every command run or file written.
     public var changeCount: Int { lock.withLock { changes } }
+    public var declineCount: Int { lock.withLock { declines } }
 
     public func clear() {
         lock.withLock { (goal, filesChanged, changedPaths, lastCommand, events, lastRequest, lastAnswer) = (nil, [], [], nil, [], nil, nil) }
@@ -104,4 +106,14 @@ public final class TaskLog: @unchecked Sendable {
             return lines.joined(separator: "\n")
         }
     }
+}
+
+/// Whether a request asks for a change to files ("fix the bug in calc.py", "can you add a test?"), as opposed to a
+/// question ("how do I fix this?"). Used to nudge the model when it answered with code instead of editing.
+public func asksForChange(_ request: String) -> Bool {
+    let words = request.lowercased().split { !$0.isLetter && $0 != "'" }
+    guard let first = words.first, !["how", "what", "why", "where", "which", "who", "when", "is", "are", "does", "explain", "describe"].contains(first) else { return false }
+    let verbs: Set<Substring> = ["fix", "change", "add", "update", "modify", "replace", "rename", "remove", "delete", "create",
+                                 "make", "write", "implement", "refactor", "edit"]
+    return words.contains { verbs.contains($0) }
 }
