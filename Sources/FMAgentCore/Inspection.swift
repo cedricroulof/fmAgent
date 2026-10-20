@@ -118,6 +118,12 @@ public func searchFiles(_ query: String, in path: String, shown: String? = nil, 
             files.append(path + "/" + relative)
         }
     } else {
+        // the same checks as in the walk: a huge file would be read whole, and a FIFO or device would block
+        let values = try? URL(fileURLWithPath: path).resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+        guard values?.isRegularFile == true else { return "\(shown) is not a regular file; not searched." }
+        guard (values?.fileSize ?? 0) <= InspectionLimits.searchFileBytes else {
+            return "\(shown) is larger than \(InspectionLimits.searchFileBytes / 1_000_000) MB; not searched. Read it in parts with readFile."
+        }
         files = [path]
     }
 

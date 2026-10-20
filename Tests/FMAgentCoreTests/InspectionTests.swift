@@ -85,6 +85,10 @@ func makeTree(_ name: String, _ files: [String: String]) throws -> String {
     #expect(searchFiles("total", in: dir, maxFiles: 1).contains("[stopped after scanning 1 files"))
     #expect(searchFiles("nothing", in: dir, shown: "proj") == "No matches for \"nothing\" in proj.")
     #expect(searchFiles("total", in: dir + "/Sources/app.swift", display: workspace.display).hasPrefix("Sources/app.swift:1:"))
+    let big = dir + "/big.txt"
+    try String(repeating: "total\n", count: InspectionLimits.searchFileBytes / 6 + 1).write(toFile: big, atomically: true, encoding: .utf8)
+    #expect(searchFiles("total", in: big, shown: "big.txt") == "big.txt is larger than 1 MB; not searched. Read it in parts with readFile.")
+    #expect(searchFiles("x", in: "/dev/null", shown: "null") == "null is not a regular file; not searched.")
 }
 
 @Test func inspectionToolsResolvePathsInTheWorkspace() async throws {
