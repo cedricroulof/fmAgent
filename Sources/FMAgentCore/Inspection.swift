@@ -59,7 +59,7 @@ public func readFileExcerpt(_ path: String, shown: String? = nil, startLine: Int
 
     var body: [String] = [], bytes = 0, end = start - 1
     for number in start...min(total, start + wanted - 1) {
-        let line = "\(number)| " + clip(lines[number - 1], to: InspectionLimits.lineChars)
+        let line = "\(number)\t" + clip(lines[number - 1], to: InspectionLimits.lineChars)  // a tab, so leading spaces are unambiguous
         if bytes + line.utf8.count > maxBytes && !body.isEmpty { break }
         body.append(line)
         bytes += line.utf8.count + 1
@@ -90,7 +90,7 @@ public func listDirectory(_ path: String, shown: String? = nil, limit: Int = Ins
     return result
 }
 
-/// Case-insensitive literal search below `path` (or in one file). Hidden folders, dependency folders, symlinks,
+/// Case-insensitive literal search of file names and lines below `path` (or in one file). Hidden folders, dependency folders, symlinks,
 /// binary and very large files are skipped; the number of files scanned and of results is bounded.
 public func searchFiles(_ query: String, in path: String, shown: String? = nil, display: (String) -> String = { $0 },
                         maxResults: Int = InspectionLimits.searchResults, maxFiles: Int = InspectionLimits.searchFiles) -> String {
@@ -129,6 +129,9 @@ public func searchFiles(_ query: String, in path: String, shown: String? = nil, 
 
     var matches: [String] = [], extra = 0
     for file in files.sorted() {
+        if (file as NSString).lastPathComponent.range(of: query, options: .caseInsensitive) != nil {
+            if matches.count < maxResults { matches.append("\(display(file)): file name matches") } else { extra += 1 }
+        }
         guard let data = FileManager.default.contents(atPath: file), !data.prefix(8192).contains(0),
               let text = String(data: data, encoding: .utf8) else { continue }
         for (index, line) in text.split(separator: "\n", omittingEmptySubsequences: false).enumerated()

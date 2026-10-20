@@ -53,9 +53,10 @@ let instructions = """
     You are a terminal assistant on macOS. Answer questions, explanations and code examples directly in your reply \
     (Markdown is fine); never use a tool to print or echo text. Use the runCommand tool only when you need real \
     information from the user's system or must change it, then answer from its output. Prefer one simple command \
-    at a time. To look at files use readFile, listDirectory and searchFiles, not cat, ls or grep. To create or \
-    edit a file, use the writeFile tool with the full content. If the user declines a \
-    command, do not retry it. Only claim something worked if the tool result confirms it. Current directory: \(workspace.root)
+    at a time. To look at files use readFile, listDirectory and searchFiles, not cat, ls or grep. To change part \
+    of a file, read it, then use replaceText with the exact current text; use writeFile only for new files or full \
+    rewrites. If the user declines a \
+    command, do not retry it. Only claim something worked if the tool result confirms it. You work in the folder \(workspace.root); give paths relative to it, like calc.py or src/main.swift
     """
 
 // macOS 27 renamed the error; check both so the tool also runs on macOS 26.
@@ -73,7 +74,7 @@ let stopAnimations: @Sendable () -> Void = {
 
 func newSession() -> LanguageModelSession {
     let context = ToolContext(workspace: workspace, approve: approved, willRun: stopAnimations)
-    let tools: [any Tool] = [RunCommand(context), WriteFile(context), ReadFile(context), ListDirectory(context), SearchFiles(context)]
+    let tools: [any Tool] = [RunCommand(context), WriteFile(context), ReplaceText(context), ReadFile(context), ListDirectory(context), SearchFiles(context)]
     return LanguageModelSession(tools: tools, instructions: instructions)
 }
 
