@@ -4,6 +4,8 @@ import FoundationModels
 import FMAgentCore
 
 let autoApprove = CommandLine.arguments.contains("--yes")
+// Terminal.app's session restore prints "Restored session…" around every interactive zsh started for `!` commands
+setenv("SHELL_SESSIONS_DISABLE", "1", 1)
 
 // `!command` runs on the user's terminal directly (interactive programs work) and is never sent to the model.
 // posix_spawn, not Process: Process puts the child in its own process group, so it would miss Ctrl-C and
@@ -25,7 +27,9 @@ func runDirect(_ command: String) {
     defer { signal(SIGINT, previousInt); signal(SIGQUIT, previousQuit) }
     fflush(stdout)  // print our pending output before the command's
 
-    let argv = ["/bin/zsh", "-c", command].map { strdup($0) } + [nil]
+    // -i loads ~/.zshrc so the user's aliases and functions work; +m turns off job control, which would move the
+    // command to its own process group and break Ctrl-C handling here
+    let argv = ["/bin/zsh", "-i", "+m", "-c", command].map { strdup($0) } + [nil]
     defer { argv.forEach { free($0) } }
     var pid: pid_t = 0
     let err = posix_spawn(&pid, "/bin/zsh", nil, &attr, argv, environ)
