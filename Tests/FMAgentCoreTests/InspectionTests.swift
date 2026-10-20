@@ -111,6 +111,12 @@ func makeTree(_ name: String, _ files: [String: String]) throws -> String {
     #expect(try workspace.change(to: "sub dir").get().hasSuffix("/sub dir"))
     #expect(workspace.resolve("é.txt") == (dir as NSString).standardizingPath + "/sub dir/é.txt")
     #expect(listDirectory(workspace.resolve("."), shown: ".") == ". (1 entries):\né.txt")
+    let here = (dir as NSString).standardizingPath + "/sub dir"
+    #expect(workspace.resolve("sub dir") == here && workspace.resolve("sub dir/new/a.txt") == here + "/new/a.txt")
+    #expect(workspace.resolve("sub dirx") == here + "/sub dirx")
+    try FileManager.default.createDirectory(atPath: here + "/sub dir", withIntermediateDirectories: false)
+    #expect(workspace.resolve("sub dir") == here + "/sub dir")  // a real subfolder of that name wins
+    try FileManager.default.removeItem(atPath: here + "/sub dir")
     #expect(throws: InspectionError.self) { try workspace.change(to: "missing").get() }
     #expect(isStandaloneCd("cd") && isStandaloneCd("cd sub\\ dir") && isStandaloneCd("cd ~/x"))
     #expect(!isStandaloneCd("cd Sources\npwd") && !isStandaloneCd("cd x && make") && !isStandaloneCd("cd $HOME") && !isStandaloneCd("cdx"))

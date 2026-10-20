@@ -144,7 +144,7 @@ let instructions = """
     at a time. To look at files use readFile, listDirectory and searchFiles, not cat, ls or grep. To change part \
     of a file, read it, then use replaceText with the exact current text; use writeFile only for new files or full \
     rewrites. If the user declines a \
-    command, do not retry it. Only claim something worked if the tool result confirms it. You work in the user's current folder, named \((workspace.root as NSString).lastPathComponent); give paths relative to it, like calc.py or src/main.swift (never an absolute path)
+    command, do not retry it. Only claim something worked if the tool result confirms it. You are already inside the user's project folder (\((workspace.root as NSString).lastPathComponent)), so "." is that folder: give paths relative to it, never starting with the folder's name and never absolute. To create a folder, write a file inside it
     """
 
 // macOS 27 renamed the error; check both so the tool also runs on macOS 26.

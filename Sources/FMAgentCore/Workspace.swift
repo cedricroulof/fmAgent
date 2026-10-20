@@ -16,7 +16,13 @@ public final class Workspace: @unchecked Sendable {
     }
 
     public func resolve(_ path: String) -> String {
-        let expanded = (path as NSString).expandingTildeInPath
+        var expanded = (path as NSString).expandingTildeInPath
+        // the model often starts paths with the workspace's own name ("myproj/src"): unless such a subfolder
+        // exists, that name means the workspace itself
+        let root = root, name = (root as NSString).lastPathComponent
+        if expanded == name || expanded.hasPrefix(name + "/"), !FileManager.default.fileExists(atPath: root + "/" + name) {
+            expanded = "." + expanded.dropFirst(name.count)
+        }
         let absolute = expanded.hasPrefix("/") ? expanded : root + "/" + expanded
         return (absolute as NSString).standardizingPath
     }
