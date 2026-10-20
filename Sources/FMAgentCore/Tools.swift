@@ -52,11 +52,15 @@ func failed(_ message: String) -> String {
 
 /// Asks before writing a previewed edit; a declined or stale edit leaves the file untouched.
 func confirm(_ edit: EditProposal, _ context: ToolContext, question: String, done: String) -> String {
-    guard context.approve(question) else { return "The user declined this change; nothing was written. Do not retry it; answer without it." }
+    guard context.approve(question) else {
+        context.log.declined("change \(edit.shown)")
+        return "The user declined this change; nothing was written. Do not retry it; answer without it."
+    }
     switch apply(edit) {
     case .failure(let error): return failed(error.message)
     case .success:
         context.journal.record(edit)
+        context.log.fileChanged(edit.shown)
         return done
     }
 }
@@ -103,8 +107,12 @@ public struct RunCommand: Tool {
         let cmd = try arguments.value(String.self, forProperty: "command")
         context.willRun()
         print("\n\u{1B}[33m$ \(cmd)\u{1B}[0m")
-        guard context.approve("Run this command?") else { return "The user declined to run this command. Do not run it again; answer without it." }
+        guard context.approve("Run this command?") else {
+            context.log.declined("run `\(cmd)`")
+            return "The user declined to run this command. Do not run it again; answer without it."
+        }
         let result = runCommand(cmd, in: context.workspace.root, timeout: context.commandTimeout, isCancelled: context.isCancelled)
+        context.log.commandRan(cmd, result.summary)
         print("\u{1B}[2m\(result.output)\u{1B}[0m(\(result.summary))")
         return result.summary + "\n" + result.output
     }

@@ -70,7 +70,12 @@ When input is piped (`echo '!ls' | fmagent`), it falls back to plain line-by-lin
 
 The three read-only tools run without asking and show a dim line of what they looked at. `writeFile` and `replaceText` always show what will change and ask first (unless `--yes`). A declined, ambiguous or not-found change writes nothing, and if the file changed between the preview and your answer, nothing is written either. Writes are atomic and keep the file's permissions. Every tool resolves paths the same way, against fmagent's working folder: relative paths, `~`, spaces and accents work, and no shell is involved.
 
-The on-device model has a context window of about 4k tokens. When it fills up, the session resets automatically.
+The on-device model's context holds 8,192 tokens on macOS 27 (the tools' descriptions use about 700 of them). fmagent keeps a short record of the task from what actually happened, not from what the model says: the goal, files changed, the last command and its result, declined actions, and the last request and answer.
+
+- **Before it fills up:** when the conversation passes 70% of the context, fmagent quietly continues in a fresh session that starts from this record. This needs macOS 26.4 or later.
+- **If it overflows anyway:** fmagent starts fresh from the record. If nothing had been run or written yet, it asks again automatically. If something had already happened, it shows the record and lets you decide, so nothing is ever done twice.
+
+`/clear` forgets the record.
 
 ## Safety
 
