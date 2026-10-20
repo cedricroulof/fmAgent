@@ -49,5 +49,6 @@ import Testing
     #expect(slashCompletions(for: "/").count == slashCommands.count)
     #expect(slashCompletions(for: "/c").map(\.name) == ["/cd", "/clear"])
     #expect(slashCompletions(for: "/RES").map(\.name) == ["/resume"])
+    #expect(slashCompletions(for: "/p").map(\.name) == ["/permissions"])
     #expect(slashCompletions(for: "/nope").isEmpty)
 }

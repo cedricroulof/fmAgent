@@ -194,7 +194,7 @@ final class SpinnerSlot: @unchecked Sendable {
 let runningSpinner = SpinnerSlot()
 
 final class TerminalUI {
-    let autoApprove: Bool
+    var autoApprove: Bool
     let workspace: Workspace
     var rows = 24, cols = 80
     var menuRows = 0
