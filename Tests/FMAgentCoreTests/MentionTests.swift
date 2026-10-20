@@ -44,3 +44,10 @@ import Testing
     let result = attachMentionedFiles(to: "@logo.png", workspace: Workspace(root: dir))
     #expect(result == ("logo.png", ["logo.png looks like a binary file; not shown; not attached"]))
 }
+
+@Test func slashCommandsMatchByPrefix() {
+    #expect(slashCompletions(for: "/").count == slashCommands.count)
+    #expect(slashCompletions(for: "/c").map(\.name) == ["/cd", "/clear"])
+    #expect(slashCompletions(for: "/RES").map(\.name) == ["/resume"])
+    #expect(slashCompletions(for: "/nope").isEmpty)
+}

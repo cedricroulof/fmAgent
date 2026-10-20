@@ -1,7 +1,7 @@
 // Full-screen terminal UI: the conversation scrolls above an input box pinned to the bottom.
 //
 //   scroll region   welcome apple (spins until it may scroll away), then the conversation
-//   menu            @ file picker, up to 5 rows, only while open
+//   menu            @ file picker or / command menu, up to 5 rows, only while open
 //   rule / ❯ input / rule / status
 import Foundation
 import FMAgentCore
@@ -356,7 +356,13 @@ final class TerminalUI {
                     if matches.count == 1 { items = matches; sel = 0; accept() } else if matches.count > 1 { forcedMenu = true }
                 }
             case .enter:
-                if !items.isEmpty { accept(); continue }
+                if !items.isEmpty {
+                    // a command without an argument runs at once; the others wait for it
+                    let runNow = commandMenu && slashCommands.first { $0.name == items[sel] }?.argument == nil
+                    accept()
+                    if runNow { buf.removeLast(); cur = buf.count; return submit() }
+                    continue
+                }
                 if buf.allSatisfy(\.isWhitespace) && !shell { continue }
                 return submit()
             case .esc:
@@ -388,6 +394,12 @@ final class TerminalUI {
         var start = cur
         while start > 0 && !(buf[start - 1].isWhitespace && (start < 2 || buf[start - 2] != "\\")) { start -= 1 }
         return (start, String(buf[start..<cur]))
+    }
+
+    /// The `/` menu is open while the first word, starting with `/`, is being typed.
+    var commandMenu: Bool {
+        let (start, token) = currentToken()
+        return !shell && start == 0 && token.hasPrefix("/")
     }
 
     /// Completions for the word before the cursor, without its `@` and with `\ ` read as a space.
@@ -430,7 +442,7 @@ final class TerminalUI {
     func statusLine() -> String {
         if shell { return "  \(pink)! for shell mode\(reset)" }
         let mode = autoApprove ? "\(yellow)▸▸ auto-approve on\(reset)" : "\(dim)asks before running commands\(reset)"
-        return "  \(mode)\(dim) · ! for shell · @ for files · /clear · ctrl-c to quit\(reset)"
+        return "  \(mode)\(dim) · ! for shell · @ for files · / for commands · ctrl-c to quit\(reset)"
     }
 
     /// Grows or shrinks the menu area above the box, scrolling output up first so nothing is drawn over.
@@ -453,6 +465,7 @@ final class TerminalUI {
     func render() {
         let token = currentToken().text
         if menuDismissed { items = [] }
+        else if commandMenu { items = slashCompletions(for: token).map(\.name) }
         else if token.hasPrefix("@") { items = completions(for: String(token.dropFirst())) }
         else if forcedMenu { items = completions(for: token) }
         else { items = [] }
@@ -463,11 +476,19 @@ final class TerminalUI {
         let rule = accent + String(repeating: "─", count: cols) + reset
         var s = "\u{1B}[?25l"
         let first = max(0, sel - 4)
+        let commands = commandMenu ? slashCommands : []
         for i in 0..<menuRows {
             let index = first + i
-            let name = String(items[index].prefix(max(0, cols - 6)))
             s += move(rows - 3 - menuRows + i, 1) + clearLine
-            s += index == sel ? "  \(lavender)❯ + \(name)\(reset)" : "    \(dim)+ \(name)\(reset)"
+            if let command = commands.first(where: { $0.name == items[index] }) {
+                let name = command.name + (command.argument.map { " " + $0 } ?? "")
+                let line = String((name.padding(toLength: max(name.count, 22), withPad: " ", startingAt: 0) + command.about).prefix(max(0, cols - 4)))
+                let split = line.index(line.startIndex, offsetBy: min(line.count, name.count))
+                s += (index == sel ? "  \(lavender)❯ " : "    ") + "\(index == sel ? lavender : "")\(line[..<split])\(reset)\(dim)\(line[split...])\(reset)"
+            } else {
+                let name = String(items[index].prefix(max(0, cols - 6)))
+                s += index == sel ? "  \(lavender)❯ + \(name)\(reset)" : "    \(dim)+ \(name)\(reset)"
+            }
         }
         let width = max(1, cols - 3)
         let start = max(0, cur - width + 1)  // scroll long input so the cursor stays visible
