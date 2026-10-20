@@ -28,15 +28,18 @@ public final class Workspace: @unchecked Sendable {
     }
 }
 
-/// What every tool needs from the app: where paths resolve, how to ask the user, and a hook run before output.
+/// What every tool needs from the app: where paths resolve, how to ask the user, a hook run before output, and
+/// where applied edits are recorded.
 public struct ToolContext: Sendable {
     public var workspace: Workspace
     public var approve: @Sendable (String) -> Bool
     public var willRun: @Sendable () -> Void  // called before the tool prints anything
+    public var journal: EditJournal  // applied edits, for /undo
 
     public init(workspace: Workspace = Workspace(), approve: @escaping @Sendable (String) -> Bool,
-                willRun: @escaping @Sendable () -> Void = {}) {
+                willRun: @escaping @Sendable () -> Void = {}, journal: EditJournal = EditJournal()) {
         self.workspace = workspace
+        self.journal = journal
         self.approve = approve
         self.willRun = willRun
     }
