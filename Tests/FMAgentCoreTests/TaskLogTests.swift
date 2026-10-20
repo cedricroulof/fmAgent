@@ -22,6 +22,7 @@ import Testing
         Your last answer (your own words, not verified): I changed the parser. Tests should pass now.
         """)
     #expect(log.changeCount == 2)  // the command and the file change, not the declined one
+    #expect(log.declineCount == 1)
     log.clear()
     #expect(log.summary(workspace: "/p") == nil)
 }
@@ -50,4 +51,14 @@ import Testing
     #expect(summary.contains("Files changed: a.txt"))
     #expect(summary.contains("Last command: exit 4 -> exit code: 4"))
     #expect(summary.contains("the user declined: run `rm x`"))
+}
+
+@Test func changeRequestsAreToldFromQuestions() {
+    for request in ["fix the bug in lib/calc.py", "lib/calc.py prints -1 instead of 5, can you fix it?", "Add a docstring to calc.py",
+                    "make a folder named \"3DTree\" with a tree in it"] {
+        #expect(asksForChange(request), "\(request)")
+    }
+    for request in ["what does lib/calc.py do?", "how do I fix this error?", "explain the fix", "is calc.py correct?", "yo"] {
+        #expect(!asksForChange(request), "\(request)")
+    }
 }
