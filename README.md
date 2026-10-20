@@ -60,12 +60,13 @@ When input is piped (`echo '!ls' | fmagent`), it falls back to plain line-by-lin
 | Tool | What it does |
 |------|--------------|
 | `runCommand` | Runs a command with `zsh -c`, returns the exit code and combined stdout/stderr (last 3000 characters). Stdin is `/dev/null`, so interactive commands never hang. |
-| `writeFile` | Creates or overwrites a text file with the given content, creating missing folders. Multi-line files are written directly instead of through shell quoting. Errors are shown in red. |
+| `writeFile` | Creates a text file (creating missing folders), or rewrites a whole file. Overwriting shows a diff against the current content. Refuses to overwrite non-text files. |
+| `replaceText` | Changes part of a file: `oldText` must match exactly once (line numbers copied from `readFile` are ignored). Shows a unified diff and asks before writing. |
 | `readFile` | Reads numbered lines of a text file (120 lines or 6 KB per call, very long lines cut) and says where to continue. Explains missing, binary and non-UTF-8 files instead of showing them. |
 | `listDirectory` | Lists a folder, folders first, at most 100 entries. |
 | `searchFiles` | Finds lines containing some text (literal, case-insensitive) under a folder: at most 30 results and 5,000 files scanned. Skips hidden files and folders, `node_modules`/`build`-style folders, symlinks, binary files and files over 1 MB. |
 
-The three read-only tools run without asking and show a dim line of what they looked at. Every tool resolves paths the same way, against fmagent's working folder: relative paths, `~`, spaces and accents work, and no shell is involved.
+The three read-only tools run without asking and show a dim line of what they looked at. `writeFile` and `replaceText` always show what will change and ask first (unless `--yes`). A declined, ambiguous or not-found change writes nothing, and if the file changed between the preview and your answer, nothing is written either. Writes are atomic and keep the file's permissions. Every tool resolves paths the same way, against fmagent's working folder: relative paths, `~`, spaces and accents work, and no shell is involved.
 
 The on-device model has a context window of about 4k tokens. When it fills up, the session resets automatically.
 
