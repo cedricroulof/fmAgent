@@ -69,6 +69,13 @@ func pid(in file: String) -> pid_t? {
     if let child = pid(in: file) { #expect(!isAlive(child)) } else { Issue.record("no pid written") }
 }
 
+@Test func closingTheOutputDoesNotEndTheCommand() {
+    #expect(runCommand("exec 1>/dev/null 2>&1; sleep 5", timeout: 0.5).outcome == .timedOut(0.5))
+    let start = Date()
+    #expect(runCommand("echo hi; exec 1>&- 2>&-; sleep 0.5; exit 4").outcome == .exited(4))
+    #expect(Date().timeIntervalSince(start) >= 0.5)
+}
+
 @Test func cancellationStopsTheCommand() {
     let start = Date()
     let result = runCommand("sleep 300", isCancelled: { Date().timeIntervalSince(start) > 0.3 })

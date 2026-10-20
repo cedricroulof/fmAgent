@@ -77,20 +77,26 @@ public func runCommand(_ command: String, in directory: String? = nil, timeout: 
         kill(-pid, SIGKILL)
     }
 
+    var outputOpen = true  // a command can close its output and keep running: only its exit ends the wait
     while true {
         var poller = pollfd(fd: readEnd, events: Int16(POLLIN), revents: 0)
-        if poll(&poller, 1, 100) > 0 {
+        if !outputOpen {
+            usleep(100_000)
+        } else if poll(&poller, 1, 100) > 0 {
             let count = read(readEnd, &buffer, buffer.count)
-            if count <= 0 { break }  // end of output: everyone holding the pipe is gone
-            total += count
-            let chunk = buffer[0..<count]
-            let toHead = min(count, headBytes - head.count)
-            head.append(contentsOf: chunk.prefix(toHead))
-            tail.append(contentsOf: chunk.dropFirst(toHead))
-            if tail.count > tailBytes * 2 { tail = Array(tail.suffix(tailBytes)) }  // a fresh copy: a slice would keep growing the old buffer
+            if count <= 0 {
+                outputOpen = false  // everyone holding the pipe closed it
+            } else {
+                total += count
+                let chunk = buffer[0..<count]
+                let toHead = min(count, headBytes - head.count)
+                head.append(contentsOf: chunk.prefix(toHead))
+                tail.append(contentsOf: chunk.dropFirst(toHead))
+                if tail.count > tailBytes * 2 { tail = Array(tail.suffix(tailBytes)) }  // a fresh copy: a slice would keep growing the old buffer
+            }
         }
         if !exited && waitpid(pid, &status, WNOHANG) == pid { exited = true; exitTime = Date() }
-        if exited && Date().timeIntervalSince(exitTime) > 0.5 { break }  // leftovers still hold the pipe open
+        if exited && (!outputOpen || Date().timeIntervalSince(exitTime) > 0.5) { break }  // leftovers may still hold the pipe open
         if !exited && Date() > deadline { stoppedBecause = .timedOut(timeout); break }
         if !exited && isCancelled() { stoppedBecause = .cancelled; break }
     }
