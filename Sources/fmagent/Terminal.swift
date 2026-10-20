@@ -12,6 +12,11 @@ let clearLine = "\u{1B}[2K"
 
 func move(_ row: Int, _ col: Int) -> String { "\u{1B}[\(row);\(col)H" }
 
+/// Keeps the end of `text` (the useful part of a path) within `width` columns.
+func fitted(_ text: String, _ width: Int) -> String {
+    text.count <= width ? text : "…" + text.suffix(max(0, width - 1))
+}
+
 /// Unbuffered write, safe to mix with print() and with the spinner thread.
 func writeOut(_ s: String) {
     fflush(stdout)
@@ -229,7 +234,7 @@ final class TerminalUI {
         welcomeApple.settle()  // draw it once facing front…
         welcomeApple.place(at: top)  // …and keep it animatable
         writeOut(move(mid - 1, textCol) + "\(bold)fmagent\(reset)" + move(mid, textCol) + "\(dim)Apple Foundation Model · on-device\(reset)"
-            + move(mid + 1, textCol) + "\(dim)\(cwd)\(reset)")
+            + move(mid + 1, textCol) + "\(dim)\(fitted(cwd, cols - textCol))\(reset)")
         outRow = top + AppleLogo.height + 1
         writeOut(move(outRow, 1))  // the next read() takes the output position from the cursor
     }
