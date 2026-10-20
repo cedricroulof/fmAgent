@@ -17,6 +17,8 @@ let sessionStore = SessionStore()
 var sessionID = SessionStore.newID()
 var sessionTitle: String?
 var exchanges: [Exchange] = []
+// Set once shell output was shared (later answers can quote it) or the session was deleted; /clear and /resume reset it
+var savingStopped = false
 var resumeRecap: String?  // set by /resume for the next new session
 var lastShell: ShellRecord?  // the latest !command, shared with the model only by /explain-last or /fix-last
 var notesForModel: [String] = []  // things that happened outside the model's view, told with the next prompt
@@ -187,7 +189,7 @@ let stopAnimations: @Sendable () -> Void = {
 /// Saves the conversation after an answer: typed requests and answers, the task record, the folder, and hashes of
 /// the files fmagent changed (to notice later edits when resuming). Never shell output or attached file contents.
 @MainActor func saveSession() {
-    guard saveSessions, let title = sessionTitle else { return }
+    guard saveSessions, !savingStopped, let title = sessionTitle else { return }
     let task = taskLog.snapshot()
     let hashes = Dictionary(task.changedFiles.compactMap { path in fileHash(path).map { (path, $0) } }, uniquingKeysWith: { $1 })
     do {
@@ -248,7 +250,6 @@ while true {
     }
     var prompt = line.trimmingCharacters(in: .whitespaces)
     var typed = prompt  // what the task record keeps: never the shell output that /explain-last shares
-    var sharesShellOutput = false  // such an exchange is never saved to disk: output (and answers quoting it) may hold secrets
     if prompt.isEmpty { continue }
     // "!cd somewhere" would only change a short-lived shell's folder, so it means /cd
     if shell && isStandaloneCd(prompt) { (shell, prompt) = (false, "/" + prompt) }
@@ -272,7 +273,10 @@ while true {
         let lines = record.output.map { $0.isEmpty ? 0 : $0.split(separator: "\n").count } ?? 0
         print("\u{1B}[2m  sharing `\(record.command)` (exit \(record.exitCode), \(record.output == nil ? "output not captured" : "\(lines) lines of output")) with the model\u{1B}[0m")
         typed = "\(prompt) (exit \(record.exitCode))"  // not the command either: it can hold a token
-        sharesShellOutput = true
+        if saveSessions && !savingStopped {
+            print("\u{1B}[2m  shell output can hold secrets, so this conversation isn't saved from here on (/clear starts a new one)\u{1B}[0m")
+        }
+        savingStopped = true
         prompt = record.request(fix: prompt == "/fix-last")
     }
     if prompt == "/undo" {
@@ -289,7 +293,7 @@ while true {
         if let number = Int(prompt.dropFirst("/sessions delete".count).trimmingCharacters(in: .whitespaces)), prompt.hasPrefix("/sessions delete") {
             guard number >= 1, number <= saved.count else { print("\u{1B}[33mNo session \(number).\u{1B}[0m"); continue }
             try? sessionStore.delete(saved[number - 1].id)
-            if saved[number - 1].id == sessionID { sessionTitle = nil }  // stop re-saving it
+            if saved[number - 1].id == sessionID { savingStopped = true }  // the next answer would save it again
             print("\u{1B}[2m  deleted \"\(TaskLog.short(saved[number - 1].title, 60))\"\u{1B}[0m")
             continue
         }
@@ -310,7 +314,7 @@ while true {
         } else {
             print("\u{1B}[33m  its folder \(Workspace.tilde(resumed.workspace)) is gone; staying in \(Workspace.tilde(workspace.root))\u{1B}[0m")
         }
-        (sessionID, sessionTitle, exchanges, lastShell) = (resumed.id, resumed.title, resumed.exchanges, nil)
+        (sessionID, sessionTitle, exchanges, lastShell, savingStopped) = (resumed.id, resumed.title, resumed.exchanges, nil, false)
         taskLog.restore(resumed.task)
         resumeRecap = resumed.recap()
         session = newSession()
@@ -325,7 +329,7 @@ while true {
     if prompt == "/clear" || prompt == "/reset" {
         taskLog.clear()
         lastShell = nil
-        (sessionID, sessionTitle, exchanges, resumeRecap) = (SessionStore.newID(), nil, [], nil)
+        (sessionID, sessionTitle, exchanges, resumeRecap, savingStopped) = (SessionStore.newID(), nil, [], nil, false)
         session = newSession()
         if let tui { tui.clearScreen() } else { print("Session cleared.") }
         continue
@@ -355,9 +359,7 @@ while true {
     case _ where recovery != nil: reply = "\u{1B}[33m" + recovery! + "\u{1B}[0m"
     case .answer(let text):
         taskLog.answer(text)
-        if sharesShellOutput {
-            if saveSessions { print("\u{1B}[2m  (this exchange includes shell output, so it isn't saved)\u{1B}[0m") }
-        } else {
+        if !savingStopped {
             if sessionTitle == nil { sessionTitle = typed }
             exchanges.append(Exchange(request: typed, answer: text))
             saveSession()

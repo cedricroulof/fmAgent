@@ -90,7 +90,7 @@ After each answer, the conversation is saved to `~/.fmagent/sessions/<id>.json` 
 - the task record and the working folder;
 - a checksum of each file fmagent changed, to notice edits made elsewhere.
 
-It never holds `!command` output or attached file contents. An exchange that shared shell output (`/explain-last`, `/fix-last`) isn't saved at all, because the output, or an answer quoting it, may contain secrets. To delete a conversation use `/sessions delete`. To save nothing at all, start with `--no-save`.
+It never holds `!command` output or attached file contents. Once a conversation shares shell output (`/explain-last`, `/fix-last`), nothing more of it is saved, because the output, or any later answer quoting it, may contain secrets; `/clear` starts a new one. To delete a conversation use `/sessions delete`; deleting the current one also stops it being saved again. To save nothing at all, start with `--no-save`.
 
 ## Safety
 
