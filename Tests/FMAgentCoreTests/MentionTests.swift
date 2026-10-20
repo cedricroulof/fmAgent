@@ -6,6 +6,7 @@ import Testing
     #expect(mentionedPaths("compare @a.txt with @notes/my\\ file.md and @a.txt, mail a@b.com") == ["a.txt", "notes/my file.md"])
     #expect(stripFileMentions("open @notes/my\\ file.md") == "open notes/my file.md")
     #expect(mentionedPaths("see @calc.py. Also (@b.txt)!") == ["calc.py"])  // "(@" isn't a mention
+    #expect(mentionedPaths("@./a.txt @../b.txt, @.env. @src/.. and @.") == ["./a.txt", "../b.txt", ".env", "src/..", "."])
 }
 
 @Test func attachmentsAreBoundedDelimitedAndReported() throws {

@@ -8,11 +8,20 @@ func unescapeSpaces(_ path: Substring) -> String { path.replacingOccurrences(of:
 /// The paths mentioned with `@`, unescaped, in order, without repeats.
 public func mentionedPaths(_ text: String) -> [String] {
     var seen = Set<String>()
-    // punctuation after a mention ("see @a.txt, then…") belongs to the sentence, not the path
-    let trailing = CharacterSet(charactersIn: ".,;:!?)\"'")
     return text.matches(of: mentionPattern)
-        .map { unescapeSpaces($0.2).trimmingCharacters(in: trailing) }
+        .map { withoutTrailingPunctuation(unescapeSpaces($0.2)) }
         .filter { !$0.isEmpty && seen.insert($0).inserted }
+}
+
+/// Punctuation after a mention ("see @a.txt, then…") belongs to the sentence, not the path. Only the end is
+/// trimmed, so `./a`, `../a` and `.env` keep their dots, and a path ending in `.` or `..` is kept as written.
+func withoutTrailingPunctuation(_ path: String) -> String {
+    var path = Substring(path)
+    while let last = path.last, ".,;:!?)\"'".contains(last) {
+        if path == "." || path == ".." || path.hasSuffix("/.") || path.hasSuffix("/..") { break }
+        path.removeLast()
+    }
+    return String(path)
 }
 
 /// The message as the model reads it: `@a\ b.txt` becomes `a b.txt`.
